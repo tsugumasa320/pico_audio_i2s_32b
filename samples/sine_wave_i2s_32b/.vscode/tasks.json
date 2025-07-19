@@ -1,0 +1,48 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build (Pico 2)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-B", "build",
+                "-DPICO_PLATFORM=rp2350",
+                "-DPICO_BOARD=pico2",
+                "."
+            ],
+            "options": {
+                "env": {
+                    "PICO_SDK_PATH": "/Users/tsugumasayutani/.pico-sdk/sdk/2.1.1",
+                    "PICO_EXTRAS_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-extras",
+                    "PICO_EXAMPLES_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-examples"
+                }
+            },
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Make",
+            "type": "shell",
+            "command": "make",
+            "args": ["-C", "build", "-j4"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "dependsOn": "Build (Pico 2)",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            }
+        }
+    ]
+}

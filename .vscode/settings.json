@@ -1,5 +1,12 @@
 {
+    // =============================================================================
+    // CMake Tools 設定
+    // =============================================================================
+    
+    // CMake システムキットを非表示にする
     "cmake.showSystemKits": false,
+    
+    // CMake ステータスバーの表示を制御
     "cmake.options.statusBarVisibility": "hidden",
     "cmake.options.advanced": {
         "build": {
@@ -12,29 +19,59 @@
             "statusBarVisibility": "hidden"
         }
     },
+    
+    // CMake 自動設定を無効化（手動制御のため）
     "cmake.configureOnEdit": false,
     "cmake.automaticReconfigure": false,
     "cmake.configureOnOpen": false,
+    
+    // ビルドシステムとして Ninja を使用
     "cmake.generator": "Ninja",
     "cmake.cmakePath": "${userHome}/.pico-sdk/cmake/v3.31.5/bin/cmake",
+    
+    // =============================================================================
+    // C/C++ 拡張設定
+    // =============================================================================
+    
+    // デバッグショートカットを無効化
     "C_Cpp.debugShortcut": false,
+    
+    // =============================================================================
+    // プラットフォーム別環境変数設定
+    // =============================================================================
+    
+    // Windows 環境用の環境変数
     "terminal.integrated.env.windows": {
         "PICO_SDK_PATH": "${env:USERPROFILE}/.pico-sdk/sdk/2.1.1",
         "PICO_TOOLCHAIN_PATH": "${env:USERPROFILE}/.pico-sdk/toolchain/14_2_Rel1",
         "Path": "${env:USERPROFILE}/.pico-sdk/toolchain/14_2_Rel1/bin;${env:USERPROFILE}/.pico-sdk/picotool/2.1.1/picotool;${env:USERPROFILE}/.pico-sdk/cmake/v3.31.5/bin;${env:USERPROFILE}/.pico-sdk/ninja/v1.12.1;${env:PATH}"
     },
+    
+    // macOS 環境用の環境変数
     "terminal.integrated.env.osx": {
         "PICO_SDK_PATH": "${env:HOME}/.pico-sdk/sdk/2.1.1",
         "PICO_TOOLCHAIN_PATH": "${env:HOME}/.pico-sdk/toolchain/14_2_Rel1",
         "PATH": "${env:HOME}/.pico-sdk/toolchain/14_2_Rel1/bin:${env:HOME}/.pico-sdk/picotool/2.1.1/picotool:${env:HOME}/.pico-sdk/cmake/v3.31.5/bin:${env:HOME}/.pico-sdk/ninja/v1.12.1:${env:PATH}"
     },
+    
+    // Linux 環境用の環境変数
     "terminal.integrated.env.linux": {
         "PICO_SDK_PATH": "${env:HOME}/.pico-sdk/sdk/2.1.1",
         "PICO_TOOLCHAIN_PATH": "${env:HOME}/.pico-sdk/toolchain/14_2_Rel1",
         "PATH": "${env:HOME}/.pico-sdk/toolchain/14_2_Rel1/bin:${env:HOME}/.pico-sdk/picotool/2.1.1/picotool:${env:HOME}/.pico-sdk/cmake/v3.31.5/bin:${env:HOME}/.pico-sdk/ninja/v1.12.1:${env:PATH}"
     },
+    
+    // =============================================================================
+    // Raspberry Pi Pico 拡張設定
+    // =============================================================================
+    
+    // Pico 拡張機能の CMake 自動設定を有効化
     "raspberry-pi-pico.cmakeAutoConfigure": true,
+    
+    // CMake Tools の使用を無効化（Pico 拡張を優先）
     "raspberry-pi-pico.useCmakeTools": false,
+    
+    // Pico 拡張用の CMake と Ninja パス
     "raspberry-pi-pico.cmakePath": "${HOME}/.pico-sdk/cmake/v3.31.5/bin/cmake",
     "raspberry-pi-pico.ninjaPath": "${HOME}/.pico-sdk/ninja/v1.12.1/ninja"
 }
