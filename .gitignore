@@ -1,1 +1,46 @@
+# Build directories
 build/
+**/build/
+
+# VS Code History extension
+.history/
+
+# IDE and Editor files
+.vscode/
+.vs/
+*.swp
+*.swo
+*.tmp
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Desktop.ini
+
+# External dependencies (should be managed separately)
+pico-sdk/
+pico-extras/
+pico-examples/
+
+# Build artifacts
+*.uf2
+*.elf
+*.bin
+*.map
+*.hex
+*.dis
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Logs
+*.log
