@@ -94,7 +94,7 @@ uint32_t pos0 = 0;          // 左チャンネルの位相
 uint32_t pos1 = 0;          // 右チャンネルの位相
 
 const uint32_t pos_max = 0x10000 * SINE_WAVE_TABLE_LEN; // 位相の最大値
-uint vol = 20;              // 音量レベル（0-256）
+uint vol = 8;               // 音量レベル（0-256）- 歪み防止のため低減
 
 #if 0
 audio_buffer_pool_t *init_audio() {
@@ -283,7 +283,11 @@ int main() {
 
     stdio_init_all();
     
+    // デバッグ用の起動確認
+    sleep_ms(2000);  // USBシリアル安定化のための待機
+    
     printf("\n=== 32bit I2S DAC サイン波ジェネレーター ===\n");
+    printf("プログラム開始 - デバッグモード\n");
     printf("操作方法:\n");
     printf("  +/= : 音量アップ\n");
     printf("  -   : 音量ダウン\n");
@@ -342,6 +346,8 @@ int main() {
         sine_wave_table[i] = 32767 * cosf(i * 2 * (float) (M_PI / SINE_WAVE_TABLE_LEN));
     }
 
+    printf("I2Sオーディオシステム初期化中...\n");
+    
     // I2Sオーディオシステムを 44.1kHz で初期化
     ap = i2s_audio_init(44100);
     

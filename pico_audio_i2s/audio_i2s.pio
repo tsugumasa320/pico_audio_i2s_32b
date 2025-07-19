@@ -5,76 +5,141 @@
 ;
 
 ; Modified by Elehobica, 2021
+; Enhanced with detailed documentation by Claude, 2025
 
-; Transmit a mono or stereo I2S audio stream as stereo
-; This is 16 bits per sample; can be altered by modifying the "set" params,
-; or made programmable by replacing "set x" with "mov x, y" and using Y as a config register.
+; ============================================================================
+; I2S Audio Output PIO Program
+; ============================================================================
 ;
-; Autopull must be enabled, with threshold set to 32.
-; Since I2S is MSB-first, shift direction should be to left.
-; Hence the format of the FIFO word is:
+; This PIO program generates I2S audio signals for DACs like PCM5102 or ES9023.
+; It supports both 16-bit and 32-bit PCM audio with configurable resolution.
 ;
-; S16 case
-; | 31   :   16 | 15   :    0 |
-; | sample ws=0 | sample ws=1 |
+; I2S Signal Overview:
+; - BCLK (Bit Clock): Serial clock for data transmission
+; - LRCLK (Left/Right Clock): Channel select (0=Left, 1=Right)  
+; - SDATA (Serial Data): Audio data stream, MSB first
 ;
-; S32 case
-; | 31   :    0 | 31   :    0 |
-; | sample ws=0 | sample ws=1 |
+; Timing Diagram (32-bit example):
+;     BCLK    ____    ____    ____         ____    ____    ____
+;          __|    |__|    |__|    |__ ... |    |__|    |__|    |__
 ;
-; Data is output at 1 bit per clock. Use clock divider to adjust frequency.
-; Fractional divider will probably be needed to get correct bit clock period,
-; but for common syslck freqs this should still give a constant word select period.
+;     LRCLK   __________________________________|||||||||||||||||
+;          __|                                  |                
+;             |<------ Left Channel (32bits) ---|--- Right Ch. ->|
 ;
-; One output pin is used for the data output.
-; Two side-set pins are used. Bit 0 is clock, bit 1 is word select.
-
-; Send 16 bit words to the PIO for mono, 32 bit words for stereo (S16)
-; Send 32 bit words to the PIO for mono, 32 bit words * 2 for stereo (S32)
+;     SDATA   MSB                          LSB  MSB          LSB
+;          ---[L31][L30][L29]...[L1][L0]---[R31][R30]...[R0]----
+;
+; Configuration Requirements:
+; - Autopull enabled with 32-bit threshold
+; - Left shift direction (MSB first)
+; - Two side-set pins: BCLK=bit0, LRCLK=bit1  
+; - One output pin for SDATA
+;
+; Data Format in TX FIFO:
+; S16 (16-bit): | 31:16 (Left) | 15:0 (Right) |
+; S32 (32-bit): Full 32-bit samples for Left then Right
+;
+; Clock Generation:
+; - PIO clock divided down to generate BCLK
+; - BCLK frequency = PIO_clock / (2 * divider)
+; - Sample rate = BCLK / (2 * bits_per_sample)
+; - For 44.1kHz @ 32-bit: BCLK = 2.8224 MHz
+;
+; Register Usage:
+; - X: Bit counter (initialized from ISR with resolution-2)
+; - ISR: Stores bit resolution configuration
+; - OSR: Output shift register for audio data
 
 .program audio_i2s
 .side_set 2
 
-                    ;        /--- LRCLK
-                    ;        |/-- BCLK
-bitloop1:           ;        ||
-    out pins, 1       side 0b00
-    jmp x-- bitloop1  side 0b01
-    out pins, 1       side 0b10
-    mov x, isr        side 0b11
+; ============================================================================
+; I2S Transmission Main Loop
+; ============================================================================
+;
+; The program alternates between two loops:
+; - right_channel_loop (bitloop1): Transmits right channel data (LRCLK=0)
+; - left_channel_loop (bitloop0):  Transmits left channel data (LRCLK=1)
+;
+; Side-set bit mapping: | bit1=LRCLK | bit0=BCLK |
+; BCLK toggles every instruction to generate serial clock
+; LRCLK indicates channel: 0=Right, 1=Left (I2S standard)
 
-bitloop0:
-    out pins, 1       side 0b10
-    jmp x-- bitloop0  side 0b11
-    out pins, 1       side 0b00
+right_channel_loop:     ; Transmit right channel data
+                        ;        /--- LRCLK (0=Right channel)
+                        ;        |/-- BCLK 
+    out pins, 1    side 0b00   ; Output data bit, LRCLK=0, BCLK=0
+    jmp x-- right_channel_loop side 0b01   ; Dec counter, continue if not zero, BCLK=1
+    
+    ; Last bit of right channel
+    out pins, 1    side 0b10   ; Output final bit, LRCLK=1, BCLK=0 (start left)
+    mov x, isr     side 0b11   ; Reload bit counter, LRCLK=1, BCLK=1
+
+left_channel_loop:      ; Transmit left channel data  
+    out pins, 1    side 0b10   ; Output data bit, LRCLK=1, BCLK=0
+    jmp x-- left_channel_loop side 0b11   ; Dec counter, continue if not zero, BCLK=1
+    
+    ; Last bit of left channel
+    out pins, 1    side 0b00   ; Output final bit, LRCLK=0, BCLK=0 (start right)
 public entry_point:
-    mov x, isr        side 0b01
+    mov x, isr     side 0b01   ; Reload bit counter, LRCLK=0, BCLK=1
 
 % c-sdk {
 
-static inline void audio_i2s_program_init(PIO pio, uint sm, uint offset, uint data_pin, uint clock_pin_base, uint res_bits) {
+/**
+ * @brief Initialize the I2S PIO state machine for audio output
+ * 
+ * This function configures a PIO state machine to generate I2S signals
+ * compatible with audio DACs like PCM5102 or ES9023.
+ *
+ * @param pio       PIO instance (pio0 or pio1)
+ * @param sm        State machine number (0-3)
+ * @param offset    Program memory offset (from pio_add_program)
+ * @param data_pin  GPIO pin for SDATA (serial data output)
+ * @param clock_pin_base Base GPIO pin for clocks (BCLK=base, LRCLK=base+1)
+ * @param res_bits  Resolution in bits (8, 16, or 32)
+ */
+static inline void audio_i2s_program_init(PIO pio, uint sm, uint offset, 
+                                         uint data_pin, uint clock_pin_base, uint res_bits) {
+    // Get default configuration for this PIO program
     pio_sm_config sm_config = audio_i2s_program_get_default_config(offset);
 
-    sm_config_set_out_pins(&sm_config, data_pin, 1);
-    sm_config_set_sideset_pins(&sm_config, clock_pin_base);
+    // Configure pin mappings
+    sm_config_set_out_pins(&sm_config, data_pin, 1);        // SDATA output pin
+    sm_config_set_sideset_pins(&sm_config, clock_pin_base); // BCLK & LRCLK pins
+
+    // Configure shift register: MSB first, autopull at 32 bits, left shift
     sm_config_set_out_shift(&sm_config, false, true, 32);
+    
+    // Join FIFOs for TX only (double the buffer depth)
     sm_config_set_fifo_join(&sm_config, PIO_FIFO_JOIN_TX);
 
+    // Apply configuration to state machine
     pio_sm_init(pio, sm, offset, &sm_config);
 
+    // Configure GPIO pins as outputs
+    // data_pin: SDATA output
+    // clock_pin_base: BCLK output  
+    // clock_pin_base+1: LRCLK output
     uint pin_mask = (1u << data_pin) | (3u << clock_pin_base);
     pio_sm_set_pindirs_with_mask(pio, sm, pin_mask, pin_mask);
-    pio_sm_set_pins(pio, sm, 0); // clear pins
-    pio_sm_clear_fifos(pio, sm);
-    pio_sm_drain_tx_fifo(pio, sm);
+    
+    // Initialize pins to low state and clear any buffered data
+    pio_sm_set_pins(pio, sm, 0);        // Set all pins low
+    pio_sm_clear_fifos(pio, sm);        // Clear RX/TX FIFOs
+    pio_sm_drain_tx_fifo(pio, sm);      // Ensure TX FIFO is empty
 
-    // set resolution to ISR (use as config value)
-    pio_sm_set_enabled(pio, sm, false);
-    pio_sm_put_blocking(pio, sm, res_bits - 2); // res_bits should be 32, 16 or 8
-    pio_sm_exec(pio, sm, pio_encode_pull(false, false));
-    pio_sm_exec(pio, sm, pio_encode_out(pio_isr, 32));
-    pio_sm_set_enabled(pio, sm, true);
+    // Configure bit resolution in ISR register
+    // The PIO program uses ISR as a configuration register to store
+    // the number of bits per sample minus 2 (due to loop structure)
+    pio_sm_set_enabled(pio, sm, false);                     // Pause SM for setup
+    pio_sm_put_blocking(pio, sm, res_bits - 2);             // Load bit count
+    pio_sm_exec(pio, sm, pio_encode_pull(false, false));    // Pull from FIFO to OSR
+    pio_sm_exec(pio, sm, pio_encode_out(pio_isr, 32));      // Move OSR to ISR
+    pio_sm_set_enabled(pio, sm, true);                      // Resume SM
 
+    // Jump to program entry point to start I2S transmission
     pio_sm_exec(pio, sm, pio_encode_jmp(offset + audio_i2s_offset_entry_point));
 }
 

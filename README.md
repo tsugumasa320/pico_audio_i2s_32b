@@ -108,7 +108,7 @@ export PICO_EXTRAS_PATH=~/pico-development/pico-extras
 cd ~/pico-development/pico_audio_i2s_32b
 code .
 ```
-- `Ctrl+Shift+P` → `Tasks: Run Task` → `Build Sample (sine_wave_i2s_32b)`
+- `Ctrl+Shift+P` → `Tasks: Run Task` → `Build Sample 　(sine_wave_i2s_32b)` or `Upload to Pico (picotool)` 
 
 #### コマンドライン
 ```bash

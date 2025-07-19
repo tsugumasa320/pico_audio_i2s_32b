@@ -14,7 +14,7 @@
             "options": {
                 "env": {
                     "PICO_SDK_PATH": "/Users/tsugumasayutani/.pico-sdk/sdk/2.1.1",
-                    "PICO_EXTRAS_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-extras",
+                    "PICO_EXTRAS_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/libs/pico-extras",
                     "PICO_EXAMPLES_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-examples"
                 }
             },
@@ -32,6 +32,13 @@
             "type": "shell",
             "command": "make",
             "args": ["-C", "build", "-j4"],
+            "options": {
+                "env": {
+                    "PICO_SDK_PATH": "/Users/tsugumasayutani/.pico-sdk/sdk/2.1.1",
+                    "PICO_EXTRAS_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/libs/pico-extras",
+                    "PICO_EXAMPLES_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-examples"
+                }
+            },
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -43,6 +50,49 @@
                 "focus": false,
                 "panel": "shared"
             }
+        },
+        {
+            "label": "Upload to Pico 2",
+            "type": "shell",
+            "command": "/Users/tsugumasayutani/.pico-sdk/picotool/2.1.1/picotool/picotool",
+            "args": [
+                "load",
+                "build/sine_wave_i2s_32b.uf2",
+                "-fx"
+            ],
+            "options": {
+                "env": {
+                    "PICO_SDK_PATH": "/Users/tsugumasayutani/.pico-sdk/sdk/2.1.1",
+                    "PICO_EXTRAS_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/libs/pico-extras",
+                    "PICO_EXAMPLES_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-examples"
+                }
+            },
+            "group": "build",
+            "dependsOn": "Make",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Clean Build & Upload (Pico 2)",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-c",
+                "rm -rf build && mkdir build && PICO_SDK_PATH=/Users/tsugumasayutani/.pico-sdk/sdk/2.1.1 PICO_EXTRAS_PATH=/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/libs/pico-extras PICO_EXAMPLES_PATH=/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-examples cmake -B build -DPICO_PLATFORM=rp2350 -DPICO_BOARD=pico2 . && PICO_SDK_PATH=/Users/tsugumasayutani/.pico-sdk/sdk/2.1.1 PICO_EXTRAS_PATH=/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/libs/pico-extras PICO_EXAMPLES_PATH=/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-examples make -C build -j4 && /Users/tsugumasayutani/.pico-sdk/picotool/2.1.1/picotool/picotool load build/sine_wave_i2s_32b.uf2 -fx"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
         }
     ]
 }
