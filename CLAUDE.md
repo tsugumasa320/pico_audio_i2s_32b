@@ -1,5 +1,5 @@
 # CLAUDE.md
-‘S‚Ä“ú–{Œê‚Å‰ñ“š‚µ‚Ä‰º‚³‚¢
+å…¨ã¦æ—¥æœ¬èªã§å›ç­”ã—ã¦ä¸‹ã•ã„
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview

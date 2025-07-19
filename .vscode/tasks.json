@@ -1,0 +1,95 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Configure CMake",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-B", "build", 
+                "-S", ".",
+                "-DCMAKE_C_COMPILER=/usr/local/bin/arm-none-eabi-gcc",
+                "-DCMAKE_CXX_COMPILER=/usr/local/bin/arm-none-eabi-g++",
+                "-DCMAKE_ASM_COMPILER=/usr/local/bin/arm-none-eabi-gcc"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Project",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--build", "build", "--parallel"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": "$gcc",
+            "dependsOn": "Configure CMake"
+        },
+        {
+            "label": "Build Sample (sine_wave_i2s_32b)",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--build", "samples/sine_wave_i2s_32b/build", "--parallel"],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": "$gcc",
+            "dependsOn": "Configure Sample CMake"
+        },
+        {
+            "label": "Configure Sample CMake",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-B", "samples/sine_wave_i2s_32b/build", 
+                "-S", "samples/sine_wave_i2s_32b",
+                "-DCMAKE_C_COMPILER=/usr/local/bin/arm-none-eabi-gcc",
+                "-DCMAKE_CXX_COMPILER=/usr/local/bin/arm-none-eabi-g++",
+                "-DCMAKE_ASM_COMPILER=/usr/local/bin/arm-none-eabi-gcc",
+                "-DPICO_PLATFORM=rp2350",
+                "-DPICO_BOARD=pico2"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Clean Build",
+            "type": "shell",
+            "command": "rm",
+            "args": ["-rf", "build", "samples/sine_wave_i2s_32b/build"],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        },
+        {
+            "label": "Upload to Pico (picotool)",
+            "type": "shell",
+            "command": "${env:HOME}/.pico-sdk/picotool/2.1.1/picotool/picotool",
+            "args": ["load", "${workspaceFolder}/samples/sine_wave_i2s_32b/build/sine_wave_i2s_32b.uf2", "-fx"],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "dependsOn": "Build Sample (sine_wave_i2s_32b)"
+        }
+    ]
+}
