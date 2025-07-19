@@ -54,10 +54,7 @@ cd pico-sdk
 git submodule update --init
 cd ..
 
-# 3. Pico Extras をクローン
-git clone -b sdk-2.1.1 https://github.com/raspberrypi/pico-extras.git
-
-# 4. このプロジェクトをクローン
+# 3. このプロジェクトをクローン
 git clone https://github.com/tsugumasa320/pico_audio_i2s_32b.git
 ```
 
@@ -66,16 +63,16 @@ git clone https://github.com/tsugumasa320/pico_audio_i2s_32b.git
 #### macOS/Linux (.bashrc または .zshrc に追加)
 ```bash
 export PICO_SDK_PATH=~/pico-development/pico-sdk
-export PICO_EXTRAS_PATH=~/pico-development/pico-extras
 ```
 
 #### Windows (システム環境変数に追加)
 ```
 PICO_SDK_PATH=C:\pico-development\pico-sdk
-PICO_EXTRAS_PATH=C:\pico-development\pico-extras
 ```
 
-**注意**: `PICO_EXAMPLES_PATH` は不要になりました。pico-examples ディレクトリは本プロジェクトから分離されています。
+**注意**: 
+- `PICO_EXTRAS_PATH` は自動的にプロジェクト内の `lib/pico-extras` を使用します
+- `PICO_EXAMPLES_PATH` は不要です
 
 ## 🔨 ビルド方法
 

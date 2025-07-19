@@ -24,7 +24,6 @@ Desktop.ini
 
 # External dependencies (should be managed separately)
 pico-sdk/
-pico-extras/
 pico-examples/
 
 # Build artifacts

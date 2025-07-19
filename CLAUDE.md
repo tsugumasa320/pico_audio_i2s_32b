@@ -9,9 +9,10 @@ This is a 32-bit I2S DAC library for Raspberry Pi Pico/Pico 2, supporting stereo
 ## Build Commands
 
 ### Prerequisites
-- Set environment variables: `PICO_SDK_PATH`, `PICO_EXTRAS_PATH` (PICO_EXAMPLES_PATH not required)
+- Set environment variable: `PICO_SDK_PATH` (pointing to external pico-sdk)
 - Confirmed with pico-sdk 2.1.1
-- Note: pico-examples/ and pico-extras/ directories have been removed from the repository
+- Note: pico-extras is included in lib/pico-extras/ within the repository
+- PICO_EXAMPLES_PATH is not required
 
 ### Windows (Developer Command Prompt for VS 2022)
 ```bash
