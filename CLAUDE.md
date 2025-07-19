@@ -11,7 +11,7 @@ This is a 32-bit I2S DAC library for Raspberry Pi Pico/Pico 2, supporting stereo
 ### Prerequisites
 - Set environment variable: `PICO_SDK_PATH` (pointing to external pico-sdk)
 - Confirmed with pico-sdk 2.1.1
-- Note: pico-extras is included in lib/pico-extras/ within the repository
+- Note: pico-extras is included in libs/pico-extras/ within the repository
 - PICO_EXAMPLES_PATH is not required
 
 ### Windows (Developer Command Prompt for VS 2022)
@@ -36,12 +36,12 @@ make -j4
 
 ### Core Components
 
-#### Main Library (`src/`)
+#### Main Library (`pico_audio_i2s/`)
 - `audio_i2s.c` - Main I2S implementation using PIO and DMA
 - `audio_i2s.pio` - PIO assembly program for I2S timing
 - `include/pico/audio_i2s.h` - Public API definitions
 
-#### Audio Processing (`src/pico_audio_32b/`)
+#### Audio Processing (`pico_audio_i2s/pico_audio_32b/`)
 - `audio.cpp` - Audio buffer management and format conversion
 - `audio_utils.S` - Assembly utilities for audio processing
 - `include/pico/audio.h` - Audio framework definitions

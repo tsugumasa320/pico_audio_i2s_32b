@@ -71,7 +71,7 @@ PICO_SDK_PATH=C:\pico-development\pico-sdk
 ```
 
 **注意**: 
-- `PICO_EXTRAS_PATH` は自動的にプロジェクト内の `lib/pico-extras` を使用します
+- `PICO_EXTRAS_PATH` は自動的にプロジェクト内の `libs/pico-extras` を使用します
 - `PICO_EXAMPLES_PATH` は不要です
 
 ## 🔨 ビルド方法
