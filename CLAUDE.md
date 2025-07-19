@@ -74,3 +74,111 @@ Located in `samples/` directory with individual CMakeLists.txt and README files 
 - GP17: LRCK (left/right clock)
 - GP18: SDO (serial data output)
 - VBUS: 5V power for DAC
+
+## 開発ノウハウと重要事項
+
+### VS Code ビルド設定
+
+#### ❌ 問題: RP2040/RP2350プラットフォーム切り替え失敗
+VS Codeでプラットフォームを切り替える際、CMakeキャッシュが原因で古い設定が残る問題が発生する。
+
+**症状:**
+```
+Family ID 'rp2040' cannot be downloaded anywhere
+ERROR: This file cannot be loaded onto a device with no partition table
+```
+
+#### ✅ 解決策: buildディレクトリの完全削除
+```bash
+# VS Code tasks.json で実装済み
+rm -rf build && mkdir build && 
+PICO_SDK_PATH=... PICO_EXTRAS_PATH=... cmake -DPICO_PLATFORM=rp2350 -DPICO_BOARD=pico2 .
+```
+
+**重要:** VS Codeタスクの環境変数は明示的に設定する必要がある。taskの依存関係では環境変数が継承されない。
+
+### 音声品質の調整
+
+#### 音量設定による歪み制御
+- **推奨値**: `uint vol = 8` (30%レベル)
+- **避けるべき値**: `vol = 20` 以上（クリッピング歪みが発生）
+- **32bit PCMでの計算**: `value = (vol * sine_table[pos]) << 8`
+
+#### サンプリング周波数の動的変更
+```c
+// 動的な周波数変更をサポート
+update_pio_frequency(new_freq, pcm_format, channel_count);
+```
+
+### CMakeキャッシュ管理
+
+#### プラットフォーム変更時の必須作業
+1. **キャッシュ削除**: `rm -rf build`
+2. **環境変数設定**: 明示的に`PICO_PLATFORM`と`PICO_BOARD`を指定
+3. **確認**: CMakeCache.txtで設定が正しく反映されているかチェック
+
+#### 環境変数の優先順位
+```bash
+# 正しい設定例
+PICO_SDK_PATH="/path/to/sdk/2.1.1"
+PICO_EXTRAS_PATH="./libs/pico-extras"  # プロジェクト内
+PICO_EXAMPLES_PATH="./pico-examples"   # プロジェクト内
+```
+
+### デバッグとトラブルシューティング
+
+#### オーディオ出力の診断
+1. **USBシリアル確認**: デバイスが認識されているか
+2. **UF2ファイル確認**: `file *.uf2`でプラットフォーム確認
+3. **クロック設定**: 96MHz動作の確認
+4. **DCDC設定**: PWMモードでノイズ低減
+
+#### ビルドエラーの対処
+- **依存関係エラー**: pico-extrasのパスを確認
+- **PIOコンパイルエラー**: pioasmのビルドとインストール確認
+- **DMAエラー**: チャンネル競合の確認
+
+### パフォーマンス最適化
+
+#### メモリ使用量
+```c
+// バッファサイズの計算
+// buffers × channels × sample_size × buffer_length
+// 例: 3 × 2 × 4 × 576 = 13.8KB
+#define PICO_AUDIO_I2S_BUFFER_SAMPLE_LENGTH 576u
+```
+
+#### リアルタイム処理
+- **i2s_callback_func()**: 割り込みコンテキストでの実行
+- **処理時間制限**: 1バッファ分の時間内で完了必須
+- **Core1処理**: `CORE1_PROCESS_I2S_CALLBACK`での分離可能
+
+### コードメンテナンス
+
+#### ドキュメント化の方針
+- **API関数**: Doxygen形式のコメント必須
+- **内部実装**: 動作原理の詳細説明
+- **設定マクロ**: 使用例と推奨値の記載
+- **エラー処理**: assert()での前提条件チェック
+
+#### テストコードの活用
+```cpp
+// samples/sine_wave_i2s_32b/ 内のテストファイル
+sine_wave_fixed.cpp      // 歪み修正版
+test_minimal.cpp         // 最小構成テスト
+test_comprehensive.cpp   // 包括的機能テスト
+```
+
+### 今後の開発指針
+
+#### 機能拡張の検討事項
+- モノラル音声の完全サポート
+- 8bit PCMフォーマットの対応
+- 可変ビットレート対応
+- 複数I2S出力の同期
+
+#### 保守性の向上
+- エラーハンドリングの強化
+- メモリリーク防止の徹底
+- プラットフォーム依存部分の分離
+- 自動テストの充実
