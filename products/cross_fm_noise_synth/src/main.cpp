@@ -103,6 +103,9 @@ bool init_synth() {
     printf("=== Cross FM Noise Synthesizer ===\n");
     printf("Initializing system...\n");
     
+    // USBシリアル安定化のための待機
+    sleep_ms(2000);
+    
     // システムクロック設定 (96MHz動作 - 高精度オーディオのため)
     printf("Setting up system clock to 96MHz...\n");
     
@@ -122,10 +125,27 @@ bool init_synth() {
         CLOCKS_CLK_SYS_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB,
         96 * MHZ,
         96 * MHZ);
+        
+    // 周辺機器クロックもシステムクロックに合わせて変更
+    clock_configure(clk_peri,
+        0,
+        CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS,
+        96 * MHZ,
+        96 * MHZ);
+    
+    // クロック変更後にUARTを再初期化
+    stdio_init_all();
     
     printf("System clock configured to 96MHz\n");
     
-    // TODO: ハードウェア制御の実装
+    // DCDC電源制御（オーディオノイズ低減）
+    const uint32_t PIN_DCDC_PSM_CTRL = 23;
+    gpio_init(PIN_DCDC_PSM_CTRL);
+    gpio_set_dir(PIN_DCDC_PSM_CTRL, GPIO_OUT);
+    gpio_put(PIN_DCDC_PSM_CTRL, 1); // PWMモードでオーディオノイズを低減
+    printf("DCDC configured for low-noise audio\n");
+    
+    // TODO: その他のハードウェア制御の実装
     // PWM初期化（LED表示用）
     // gpio_init(PIN_LED_STATUS);
     // gpio_set_dir(PIN_LED_STATUS, GPIO_OUT);
