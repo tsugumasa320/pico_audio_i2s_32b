@@ -5,7 +5,18 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 # Set PICO_EXTRAS_PATH to project local path
 set(PICO_EXTRAS_PATH ${CMAKE_CURRENT_LIST_DIR}/../../libs/pico-extras)
-include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
+# Check if pico_extras_import.cmake exists before including
+if(EXISTS ${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
+    include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
+else()
+    message(WARNING "pico_extras_import.cmake not found at ${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake")
+    # Fallback to environment variable if available
+    if(DEFINED ENV{PICO_EXTRAS_PATH})
+        include($ENV{PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
+    else()
+        message(FATAL_ERROR "PICO_EXTRAS_PATH not set and local pico-extras not found")
+    endif()
+endif()
 
 set(project_name "sine_wave_i2s_32b" C CXX ASM)
 project(${project_name})
