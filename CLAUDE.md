@@ -2,6 +2,10 @@
 全て日本語で回答して下さい
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## GitHub Actions CI/CD Pipeline
+- 完全なCI/CDパイプラインが実装済み
+- コミット後は必ずGitHub Actionsのログを確認してエラー対応を実行
+
 ## Project Overview
 
 This is a 32-bit I2S DAC library for Raspberry Pi Pico/Pico 2, supporting stereo audio output up to 192 KHz sampling frequency. The library uses PIO (Programmable I/O) to implement I2S audio interface.
