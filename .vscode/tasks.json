@@ -72,12 +72,45 @@
             "label": "Clean Build",
             "type": "shell",
             "command": "rm",
-            "args": ["-rf", "build", "samples/sine_wave_i2s_32b/build"],
+            "args": ["-rf", "build", "samples/sine_wave_i2s_32b/build", "products/cross_fm_noise_synth/build"],
             "group": "build",
             "presentation": {
                 "reveal": "always",
                 "panel": "dedicated"
             }
+        },
+        {
+            "label": "Build Product (Cross FM Noise Synth)",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--build", "products/cross_fm_noise_synth/build", "--parallel"],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": "$gcc",
+            "dependsOn": "Configure Product CMake"
+        },
+        {
+            "label": "Configure Product CMake",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-B", "products/cross_fm_noise_synth/build", 
+                "-S", "products/cross_fm_noise_synth",
+                "-DCMAKE_C_COMPILER=/usr/local/bin/arm-none-eabi-gcc",
+                "-DCMAKE_CXX_COMPILER=/usr/local/bin/arm-none-eabi-g++",
+                "-DCMAKE_ASM_COMPILER=/usr/local/bin/arm-none-eabi-gcc",
+                "-DPICO_PLATFORM=rp2350",
+                "-DPICO_BOARD=pico2"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
         },
         {
             "label": "Upload to Pico (picotool)",
@@ -90,6 +123,18 @@
                 "panel": "dedicated"
             },
             "dependsOn": "Build Sample (sine_wave_i2s_32b)"
+        },
+        {
+            "label": "Upload Product to Pico (Cross FM Synth)",
+            "type": "shell",
+            "command": "${env:HOME}/.pico-sdk/picotool/2.1.1/picotool/picotool",
+            "args": ["load", "${workspaceFolder}/products/cross_fm_noise_synth/build/cross_fm_noise_synth.uf2", "-fx"],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "dependsOn": "Build Product (Cross FM Noise Synth)"
         }
     ]
 }
