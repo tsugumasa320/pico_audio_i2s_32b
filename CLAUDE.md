@@ -7,8 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - コミット後は必ずGitHub Actionsのログを確認してエラー対応を実行
 
 ### コミット後の必須確認手順
+**注意**: ソースコード・設定ファイル・ワークフローを変更した場合のみ実行。ドキュメントのみの変更時は不要。
+
 ```bash
-# 1. プッシュ後の確認
+# 1. プッシュ後の確認（ソースコード変更時のみ）
 git push origin main
 sleep 30
 gh run list --limit 3
