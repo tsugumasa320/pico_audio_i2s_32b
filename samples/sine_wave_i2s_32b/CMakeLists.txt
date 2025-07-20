@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 pico_sdk_init()
 
-add_subdirectory(../../pico_audio_i2s/pico_audio_32b pico_audio_32b)
+add_subdirectory(../../libs/pico_audio_32b pico_audio_32b)
 add_subdirectory(../.. pico_audio_i2s_32b)
 
 set(bin_name ${PROJECT_NAME})
