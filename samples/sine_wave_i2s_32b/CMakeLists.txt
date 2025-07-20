@@ -3,7 +3,9 @@ cmake_minimum_required(VERSION 3.13)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
-include($ENV{PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
+# Set PICO_EXTRAS_PATH to project local path
+set(PICO_EXTRAS_PATH ${CMAKE_CURRENT_LIST_DIR}/../../libs/pico-extras)
+include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
 
 set(project_name "sine_wave_i2s_32b" C CXX ASM)
 project(${project_name})

@@ -199,6 +199,37 @@ export PICO_SDK_PATH="/path/to/pico-sdk"  # 外部SDKへのパス
 sine_wave.cpp           // メインのサイン波生成サンプル
 ```
 
+### ローカルビルド手順（重要）
+
+#### **必須**: コミット前の確認作業
+```bash
+# 1. ローカルでビルドテストを必ず実行
+cd samples/sine_wave_i2s_32b && rm -rf build && mkdir build
+PICO_SDK_PATH=/path/to/pico-sdk cmake -DPICO_PLATFORM=rp2350 -DPICO_BOARD=pico2 -S . -B build
+make -C build
+
+# 2. 製品プロジェクトのビルドテスト
+cd products/cross_fm_noise_synth && rm -rf build && mkdir build
+PICO_SDK_PATH=/path/to/pico-sdk cmake -DPICO_PLATFORM=rp2350 -DPICO_BOARD=pico2 -S . -B build
+make -C build
+
+# 3. ビルド成功後にコミット・プッシュ
+git add .
+git commit -m "message"
+git push origin main
+```
+
+#### ビルド時の注意点
+- **PICO_SDK_PATH**: 環境変数で正しいSDKパスを指定
+- **CMAKE_ASM_COMPILER**: ASMコンパイラーエラーが出る場合は適切に設定
+- **libs/pico-extras**: プロジェクト内に含まれているパスを正しく指定
+- **DaisySP**: サブモジュールとして追加済み、初期化必要な場合は `git submodule update --init`
+
+#### VS Codeタスク利用
+- `Build Product (Cross FM Noise Synth)`: 製品ビルド
+- `Build Sample (sine_wave_i2s_32b)`: サンプルビルド  
+- `Clean Build`: 全ビルドディレクトリクリア
+
 ### 今後の開発指針
 
 #### 機能拡張の検討事項
