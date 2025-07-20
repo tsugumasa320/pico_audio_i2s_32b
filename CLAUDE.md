@@ -6,6 +6,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 完全なCI/CDパイプラインが実装済み
 - コミット後は必ずGitHub Actionsのログを確認してエラー対応を実行
 
+### コミット後の必須確認手順
+```bash
+# 1. プッシュ後の確認
+git push origin main
+sleep 30
+gh run list --limit 3
+
+# 2. エラー時の詳細分析
+gh run view [run-id] --log-failed
+
+# 3. 実行中ワークフローの監視
+gh run view [run-id]
+```
+
+### 重要な修正ノウハウ
+- **cppcheck**: 埋め込み開発では `--suppress=missingInclude,unknownMacro,cstyleCast` が必要
+- **clang-format**: 厳密チェックは警告のみに変更（`--Werror` を削除）
+- **タブ文字チェック**: `libs/` ディレクトリは除外（pico-extras含むため）
+- **VS Code settings.json**: JSONコメント削除が必要（標準JSONツールとの互換性）
+- **ハードコードパス**: ドキュメント（*.md）は除外して実行可能
+
+### GitHub CLI認証設定
+```bash
+gh auth login --web
+gh repo set-default tsugumasa320/pico_audio_i2s_32b
+```
+
 ## Project Overview
 
 This is a 32-bit I2S DAC library for Raspberry Pi Pico/Pico 2, supporting stereo audio output up to 192 KHz sampling frequency. The library uses PIO (Programmable I/O) to implement I2S audio interface.
