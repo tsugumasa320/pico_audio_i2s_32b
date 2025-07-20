@@ -20,30 +20,55 @@
 #include "hardware/clocks.h"
 #include "hardware/pll.h"
 
-// TODO: シンセサイザー機能のヘッダーファイル実装
-// #include "synth_config.h"
-// #include "fm_engine.h"
-// #include "noise_generator.h"
-// #include "cross_modulator.h"
-// #include "ui_controller.h"
-// #include "preset_manager.h"
-// #include "analog_multiplexer.h"
+#include "synth_config.h"
+#include "simple_fm.h"
+#include "simple_noise.h"
+#include "cross_mod.h"
 
 // グローバル状態
-// static SynthState g_synth_state;
 static audio_buffer_pool_t *g_audio_pool;
-// static AnalogMultiplexer g_multiplexer;
+static SimpleFM g_fm_synth;
+static SimpleNoise g_noise_gen;
+static CrossModulator g_cross_mod;
+
+// パラメーター制御
+static struct {
+    float fm_frequency = 440.0f;
+    float fm_ratio = 1.5f;
+    float fm_index = 2.0f;
+    float noise_level = 0.3f;
+    SimpleNoise::NoiseType noise_type = SimpleNoise::WHITE_NOISE;
+    float cross_depth = 0.5f;
+    float cross_rate = 0.8f;
+    float master_volume = 0.7f;
+} g_params;
 
 // グローバル変数
 static bool audio_enabled = false;
 static uint32_t audio_phase = 0;
 
 /**
- * @brief Core1で実行される音声生成ループ
+ * @brief Core1で実行されるFMシンセサイザー音声生成ループ
  */
 void core1_audio_loop() {
-    printf("Core1 audio processing started\n");
+    printf("Core1 FM Synthesizer processing started\n");
     uint32_t buffer_count = 0;
+    
+    // シンセサイザー初期化
+    g_fm_synth.Init(44100.0f);
+    g_noise_gen.Init();
+    g_cross_mod.Init(44100.0f);
+    
+    // 初期パラメーター設定
+    g_fm_synth.SetFrequency(g_params.fm_frequency);
+    g_fm_synth.SetRatio(g_params.fm_ratio);
+    g_fm_synth.SetIndex(g_params.fm_index);
+    g_noise_gen.SetLevel(g_params.noise_level);
+    g_noise_gen.SetType(g_params.noise_type);
+    g_cross_mod.SetDepth(g_params.cross_depth);
+    g_cross_mod.SetRate(g_params.cross_rate);
+    
+    printf("FM Synthesizer initialized\n");
     
     while (true) {
         audio_buffer_t *buffer = take_audio_buffer(g_audio_pool, true);
@@ -56,13 +81,27 @@ void core1_audio_loop() {
         const uint32_t sample_count = buffer->max_sample_count;
 
         if (audio_enabled) {
-            // 440Hz テストトーン生成
-            const uint32_t phase_increment = (440UL * 0x10000UL) / 44100UL; // 440Hz @ 44.1kHz
-            
             for (uint32_t i = 0; i < sample_count; i++) {
-                // 矩形波生成 (最大レベル)
-                int32_t sample = (audio_phase & 0x8000) ? 0x7FFFFF00 : -0x7FFFFF00;
-                audio_phase += phase_increment;
+                // FM合成処理
+                float fm_output = g_fm_synth.Process();
+                
+                // ノイズ生成
+                float noise_output = g_noise_gen.Process();
+                
+                // クロスモジュレーション処理
+                float cross_output = g_cross_mod.Process(fm_output, noise_output);
+                
+                // 最終ミックス
+                float final_output = (fm_output * 0.4f + 
+                                    noise_output * 0.3f + 
+                                    cross_output * 0.3f) * g_params.master_volume;
+                
+                // クリッピング防止
+                if (final_output > 1.0f) final_output = 1.0f;
+                if (final_output < -1.0f) final_output = -1.0f;
+                
+                // 32bit signed integerに変換
+                int32_t sample = (int32_t)(final_output * 0x7FFFFF00);
                 
                 // ステレオ出力
                 samples[i * 2 + 0] = sample;  // Left
@@ -71,24 +110,24 @@ void core1_audio_loop() {
             
             // 最初の数バッファをデバッグ出力
             buffer_count++;
-            if (buffer_count <= 5) {
-                printf("Buffer %d: sample_count=%d, first_sample=0x%08x\n", 
+            if (buffer_count <= 3) {
+                printf("FM Buffer %d: sample_count=%d, first_sample=0x%08x\n", 
                        buffer_count, sample_count, samples[0]);
             }
         } else {
             // 無音
             for (uint32_t i = 0; i < sample_count; i++) {
-                samples[i * 2 + 0] = 0;  // Left
-                samples[i * 2 + 1] = 0;  // Right
+                samples[i * 2 + 0] = DAC_ZERO;  // Left
+                samples[i * 2 + 1] = DAC_ZERO;  // Right
             }
         }
 
         buffer->sample_count = sample_count;
         give_audio_buffer(g_audio_pool, buffer);
         
-        // 100バッファごとにデバッグ出力
-        if (buffer_count % 100 == 0) {
-            printf("Processed %d audio buffers, phase=0x%08x\n", buffer_count, audio_phase);
+        // 500バッファごとにデバッグ出力
+        if (buffer_count % 500 == 0) {
+            printf("FM Synth: %d buffers processed\n", buffer_count);
         }
     }
 }
@@ -254,21 +293,55 @@ int main() {
     
     printf("Cross FM Noise Synthesizer starting...\n");
     
-    // メインループ (Core0はUI制御用)
+    // メインループ (Core0はUI制御とパラメーター変更用)
     while (true) {
         // 現在時刻取得
         uint32_t current_time = to_ms_since_boot(get_absolute_time());
         
+        // パラメーター動的変更（デモ用）
+        static uint32_t last_param_time = 0;
+        if (current_time - last_param_time > 2000) {  // 2秒ごとにパラメーター変更
+            // FM周波数をゆっくり変化
+            static float freq_direction = 1.0f;
+            g_params.fm_frequency += freq_direction * 20.0f;
+            if (g_params.fm_frequency > 800.0f) {
+                g_params.fm_frequency = 800.0f;
+                freq_direction = -1.0f;
+            } else if (g_params.fm_frequency < 200.0f) {
+                g_params.fm_frequency = 200.0f;
+                freq_direction = 1.0f;
+            }
+            
+            // FM比率も変化
+            static float ratio_direction = 1.0f;
+            g_params.fm_ratio += ratio_direction * 0.1f;
+            if (g_params.fm_ratio > 3.0f) {
+                g_params.fm_ratio = 3.0f;
+                ratio_direction = -1.0f;
+            } else if (g_params.fm_ratio < 0.5f) {
+                g_params.fm_ratio = 0.5f;
+                ratio_direction = 1.0f;
+            }
+            
+            // シンセサイザーパラメーター更新
+            g_fm_synth.SetFrequency(g_params.fm_frequency);
+            g_fm_synth.SetRatio(g_params.fm_ratio);
+            
+            last_param_time = current_time;
+        }
+        
         // デバッグ情報を定期的に出力
         static uint32_t last_debug_time = 0;
-        if (current_time - last_debug_time > 5000) {  // 5秒ごと
-            printf("Cross FM Synth running... Audio Core1 active\n");
+        if (current_time - last_debug_time > 8000) {  // 8秒ごと
+            printf("FM Synth: freq=%.1fHz, ratio=%.2f, index=%.2f\n", 
+                   g_params.fm_frequency, g_params.fm_ratio, g_params.fm_index);
             last_debug_time = current_time;
         }
         
-        // TODO: UIコントロール処理
+        // TODO: 本格的なUIコントロール処理
+        // - エンコーダー入力
         // - ボタン入力
-        // - アナログコントロール読み取り
+        // - アナログマルチプレクサー読み取り
         // - プリセット管理
         
         // 待機
