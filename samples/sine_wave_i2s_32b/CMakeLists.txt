@@ -3,15 +3,7 @@ cmake_minimum_required(VERSION 3.13)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
-# Check if we have local pico-extras available
-set(PICO_EXTRAS_PATH ${CMAKE_CURRENT_LIST_DIR}/../../libs/pico-extras)
-if(EXISTS ${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
-    include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
-elseif(DEFINED ENV{PICO_EXTRAS_PATH} AND EXISTS $ENV{PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
-    include($ENV{PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
-else()
-    message(STATUS "pico-extras not available, continuing without it")
-endif()
+# Note: This sample does not require pico-extras
 
 set(project_name "sine_wave_i2s_32b" C CXX ASM)
 project(${project_name})
