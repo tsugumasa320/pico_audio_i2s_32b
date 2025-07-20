@@ -29,7 +29,7 @@
 static audio_buffer_pool_t *g_audio_pool;
 static SimpleFM g_fm_synth;
 static SimpleNoise g_noise_gen;
-static CrossModulator g_cross_mod;
+static CrossMod g_cross_mod;
 
 // パラメーター制御
 static struct {
@@ -46,6 +46,7 @@ static struct {
 // グローバル変数
 static bool audio_enabled = false;
 static uint32_t audio_phase = 0;
+static constexpr int32_t DAC_ZERO = 1;  // DACのゼロレベル
 
 /**
  * @brief Core1で実行されるFMシンセサイザー音声生成ループ
@@ -193,7 +194,6 @@ bool init_synth() {
     
     // sine_wave_i2s_32bと同じバッファサイズを使用
     #define SAMPLES_PER_BUFFER 1156
-    static constexpr int32_t DAC_ZERO = 1;  // DACのゼロレベル
     
     static audio_format_t audio_format = {
         .sample_freq = 44100,                // サンプリング周波数: 44.1kHz (CD品質)

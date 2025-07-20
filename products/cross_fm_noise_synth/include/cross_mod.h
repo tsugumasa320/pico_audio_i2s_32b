@@ -8,7 +8,7 @@
  * 
  * FMとノイズ信号間の相互変調を実装
  */
-class CrossModulator
+class CrossMod
 {
 public:
     void Init(float samplerate)
