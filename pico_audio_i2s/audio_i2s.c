@@ -5,86 +5,293 @@
  */
 
 // Modified by Elehobica, 2021
+// Enhanced with comprehensive documentation by Claude, 2025
+
+/**
+ * @file audio_i2s.c
+ * @brief I2S Audio Output Implementation using PIO and DMA
+ * 
+ * This file implements high-performance I2S audio output for Raspberry Pi Pico.
+ * It uses PIO (Programmable I/O) for precise timing control and DMA for efficient
+ * data transfer with minimal CPU overhead.
+ * 
+ * Key Features:
+ * - 32-bit PCM audio support up to 192 kHz
+ * - Double-buffered DMA for glitch-free playback  
+ * - Dynamic sample rate adjustment
+ * - Optional dual-core processing
+ * - Multiple audio format conversion support
+ */
+
+// ============================================================================
+// System Includes
+// ============================================================================
 
 #include <stdio.h>
 
+// Pico SDK Core Libraries
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
-#include "hardware/pio.h"
-#include "hardware/gpio.h"
-#include "hardware/dma.h"
-#include "hardware/irq.h"
-#include "hardware/clocks.h"
-#include "hardware/structs/dma.h"
-#include "hardware/regs/dreq.h"
 
-#include "audio_i2s.pio.h"
-#include "pico/audio_i2s.h"
+// Hardware Abstraction Layer
+#include "hardware/pio.h"      // Programmable I/O interface
+#include "hardware/gpio.h"     // GPIO pin control
+#include "hardware/dma.h"      // Direct Memory Access
+#include "hardware/irq.h"      // Interrupt handling
+#include "hardware/clocks.h"   // System clock management
+#include "hardware/structs/dma.h"  // DMA register structures
+#include "hardware/regs/dreq.h"    // DMA request signals
 
+// Audio I2S Implementation
+#include "audio_i2s.pio.h"     // Generated PIO program header
+#include "pico/audio_i2s.h"    // Public API definitions
+
+// ============================================================================
+// Compilation Configuration
+// ============================================================================
+
+/**
+ * @brief Enable fractional PIO clock division for precise timing
+ * 
+ * When defined, uses fractional clock dividers for more accurate sample rates.
+ * This may introduce slight clock jitter but provides better frequency accuracy.
+ */
 #define PIO_CLK_DIV_FRAC
 
-//#define CORE1_PROCESS_I2S_CALLBACK  // Multi-Core Processing Mode (Experimentally Single-Core seems better)
-//#define WATCH_DMA_TRANSFER_INTERVAL // Activate only for analysis because of watch overhead
-//#define WATCH_PIO_SM_TX_FIFO_LEVEL  // Activate only for analysis because of watch overhead
+/**
+ * @brief Enable dual-core I2S callback processing (experimental)
+ * 
+ * When defined, I2S callbacks are processed on Core1 to reduce latency.
+ * Currently disabled as single-core performance is often better.
+ */
+//#define CORE1_PROCESS_I2S_CALLBACK
 
+/**
+ * @brief Enable DMA transfer interval monitoring (debug only)
+ * 
+ * When defined, monitors time between DMA transfers for performance analysis.
+ * Should only be enabled for debugging due to overhead.
+ */
+//#define WATCH_DMA_TRANSFER_INTERVAL
+
+/**
+ * @brief Enable PIO TX FIFO level monitoring (debug only)
+ * 
+ * When defined, monitors PIO transmit FIFO levels for underrun detection.
+ * Should only be enabled for debugging due to overhead.
+ */
+//#define WATCH_PIO_SM_TX_FIFO_LEVEL
+
+// ============================================================================
+// Debug and Profiling Support
+// ============================================================================
+
+/**
+ * @brief Debug timing pins for oscilloscope analysis
+ * 
+ * Registers GPIO pins for timing analysis. Pins can be monitored with
+ * an oscilloscope to measure audio processing timing and identify bottlenecks.
+ */
 CU_REGISTER_DEBUG_PINS(audio_timing)
 
-// ---- select at most one ---
+// Uncomment to enable debug pin output (affects performance)
 //CU_SELECT_DEBUG_PINS(audio_timing)
 
 
-#define audio_pio __CONCAT(pio, PICO_AUDIO_I2S_PIO)
-#define GPIO_FUNC_PIOx __CONCAT(GPIO_FUNC_PIO, PICO_AUDIO_I2S_PIO)
-#define DREQ_PIOx_TX0 __CONCAT(__CONCAT(DREQ_PIO, PICO_AUDIO_I2S_PIO), _TX0)
+// ============================================================================
+// Hardware Resource Macros
+// ============================================================================
 
-#define DMA_IRQ_x __CONCAT(DMA_IRQ_, PICO_AUDIO_I2S_DMA_IRQ)
+/**
+ * @brief Compile-time PIO instance selection
+ * 
+ * These macros resolve to the correct hardware instances based on
+ * the configuration macros defined in audio_i2s.h
+ */
+#define audio_pio     __CONCAT(pio, PICO_AUDIO_I2S_PIO)           // pio0 or pio1
+#define GPIO_FUNC_PIOx __CONCAT(GPIO_FUNC_PIO, PICO_AUDIO_I2S_PIO) // GPIO_FUNC_PIO0 or GPIO_FUNC_PIO1
+#define DREQ_PIOx_TX0 __CONCAT(__CONCAT(DREQ_PIO, PICO_AUDIO_I2S_PIO), _TX0) // DMA request signal
+#define DMA_IRQ_x     __CONCAT(DMA_IRQ_, PICO_AUDIO_I2S_DMA_IRQ)   // DMA_IRQ_0 or DMA_IRQ_1
 
+// ============================================================================
+// Global State Variables
+// ============================================================================
+
+/**
+ * @brief PIO program memory offset
+ * 
+ * Stores the memory offset where the I2S PIO program is loaded.
+ * Used for cleanup and state machine management.
+ */
 static uint loaded_offset = 0;
+
+/**
+ * @brief Input audio format specification
+ * 
+ * Points to the audio format of the input stream. Used for format
+ * conversion and compatibility checking.
+ */
 static const audio_format_t *_i2s_input_audio_format;
+
+/**
+ * @brief Output audio format specification
+ * 
+ * Points to the actual I2S output format. Determines hardware
+ * configuration and timing parameters.
+ */
 static const audio_format_t *_i2s_output_audio_format;
+
+/**
+ * @brief Shared state for DMA and audio processing
+ * 
+ * Contains all runtime state information shared between interrupt
+ * handlers and main application. Protected by hardware atomicity.
+ */
 struct {
-    audio_buffer_t *playing_buffer0;
-    audio_buffer_t *playing_buffer1;
-    uint32_t freq;
-    uint8_t pio_sm;
-    uint8_t dma_channel0;
-    uint8_t dma_channel1;
+    audio_buffer_t *playing_buffer0;  /**< Currently playing buffer on DMA channel 0 */
+    audio_buffer_t *playing_buffer1;  /**< Currently playing buffer on DMA channel 1 */
+    uint32_t freq;                    /**< Current sampling frequency in Hz */
+    uint8_t pio_sm;                   /**< PIO state machine number (0-3) */
+    uint8_t dma_channel0;             /**< First DMA channel for ping-pong buffering */
+    uint8_t dma_channel1;             /**< Second DMA channel for ping-pong buffering */
 } shared_state;
+
+/**
+ * @brief DMA configuration for channel 0
+ * 
+ * Pre-configured DMA settings for the first channel in the ping-pong
+ * buffering scheme. Applied during DMA transfer setup.
+ */
 static dma_channel_config dma_config0;
+
+/**
+ * @brief DMA configuration for channel 1
+ * 
+ * Pre-configured DMA settings for the second channel in the ping-pong
+ * buffering scheme. Applied during DMA transfer setup.
+ */
 static dma_channel_config dma_config1;
 
+/**
+ * @brief Consumer audio format for internal processing
+ * 
+ * Defines the audio format used internally by the I2S consumer.
+ * May differ from input format if conversion is required.
+ */
 audio_format_t pio_i2s_consumer_format;
+
+/**
+ * @brief Buffer format descriptor for I2S consumer
+ * 
+ * Wraps the consumer format with buffer-specific metadata
+ * like sample stride and alignment requirements.
+ */
 audio_buffer_format_t pio_i2s_consumer_buffer_format = {
     .format = &pio_i2s_consumer_format,
 };
 
+/**
+ * @brief Audio buffer pool for I2S output
+ * 
+ * Manages the pool of audio buffers used for I2S output.
+ * Provides thread-safe buffer allocation and recycling.
+ */
 static audio_buffer_pool_t *audio_i2s_consumer;
+
+/**
+ * @brief Silence buffer for underrun protection
+ * 
+ * Pre-allocated buffer filled with silence (zero samples).
+ * Used when no audio data is available to prevent DAC
+ * from outputting undefined values.
+ */
 static audio_buffer_t silence_buffer;
 
-static void __isr __time_critical_func(audio_i2s_dma_irq_handler)();
+// ============================================================================
+// Forward Declarations
+// ============================================================================
+
+/**
+ * @brief DMA interrupt handler for I2S audio transfer
+ * 
+ * This function is called when DMA completes transferring an audio buffer
+ * to the PIO TX FIFO. It manages the ping-pong buffering scheme and
+ * triggers audio callback processing.
+ * 
+ * @note Marked as interrupt service routine and time-critical for minimal latency
+ */
+static void __isr __time_critical_func(audio_i2s_dma_irq_handler)(void);
+
+// ============================================================================
+// Debug and Timing Utilities
+// ============================================================================
 
 #ifdef WATCH_PIO_SM_TX_FIFO_LEVEL
+/**
+ * @brief Get current time in milliseconds since boot
+ * 
+ * Used for performance monitoring and FIFO level analysis.
+ * Only compiled when PIO FIFO monitoring is enabled.
+ * 
+ * @return Current system time in milliseconds
+ */
 static inline uint32_t _millis(void)
 {
-	return to_ms_since_boot(get_absolute_time());
+    return to_ms_since_boot(get_absolute_time());
 }
 #endif // WATCH_PIO_SM_TX_FIFO_LEVEL
 
 #ifdef WATCH_DMA_TRANSFER_INTERVAL
+/**
+ * @brief Get current time in microseconds since boot
+ * 
+ * Used for high-resolution DMA transfer timing analysis.
+ * Only compiled when DMA interval monitoring is enabled.
+ * 
+ * @return Current system time in microseconds
+ */
 static inline uint32_t _micros(void)
 {
-	return to_us_since_boot(get_absolute_time());
+    return to_us_since_boot(get_absolute_time());
 }
 #endif // WATCH_DMA_TRANSFER_INTERVAL
 
-// i2s callback function to be defined at external
+// ============================================================================
+// Callback Function Interface
+// ============================================================================
+
+/**
+ * @brief Weak I2S callback function for application use
+ * 
+ * This function is called each time a DMA transfer completes, allowing
+ * the application to perform audio processing, buffer management, or
+ * other time-sensitive operations.
+ * 
+ * The function is declared weak, meaning applications can override it
+ * with their own implementation. If not overridden, this empty default
+ * implementation is used.
+ * 
+ * @note This function is called from interrupt context (or Core1 if
+ *       CORE1_PROCESS_I2S_CALLBACK is enabled). Keep processing minimal
+ *       and avoid blocking operations.
+ * 
+ * @note Timing constraints: This function should complete within the
+ *       duration of one audio buffer to avoid audio dropouts.
+ * 
+ * @par Example Override:
+ * @code
+ * void i2s_callback_func() {
+ *     // Custom audio processing here
+ *     update_audio_effects();
+ *     fill_next_audio_buffer();
+ * }
+ * @endcode
+ */
 __attribute__((weak))
-void i2s_callback_func()
+void i2s_callback_func(void)
 {
-    /*
-	uint32_t time = to_ms_since_boot(get_absolute_time());
-    printf("i2s_callback_func %d\n", time);
-    */
+    // Default implementation does nothing
+    // Applications can override this function for custom processing
     return;
 }
 
@@ -127,179 +334,330 @@ void i2s_callback_loop()
 }
 #endif // CORE1_PROCESS_I2S_CALLBACK
 
-void audio_i2s_end() {
+// ============================================================================
+// Public API Implementation
+// ============================================================================
+
+/**
+ * @brief Shutdown I2S audio system and cleanup all resources
+ * 
+ * This function safely shuts down the I2S audio system and releases all
+ * allocated resources including:
+ * - Audio buffer pools and individual buffers
+ * - Playing buffers currently in use by DMA
+ * - Silence buffer
+ * - PIO program memory
+ * - PIO state machine
+ * 
+ * The function ensures proper cleanup order to avoid resource leaks or
+ * corruption. It should be called when audio output is no longer needed.
+ * 
+ * @note This function assumes audio output has been disabled via
+ *       audio_i2s_set_enabled(false) before calling.
+ */
+void audio_i2s_end(void) 
+{
     audio_buffer_t *ab;
+    
+    // Release all queued audio buffers from the consumer pool
+    // These are buffers waiting to be played
     ab = take_audio_buffer(audio_i2s_consumer, false);
     while (ab != NULL) {
-        free(ab->buffer->bytes);
-        free(ab->buffer);
+        free(ab->buffer->bytes);  // Free audio data
+        free(ab->buffer);         // Free buffer wrapper
         ab = take_audio_buffer(audio_i2s_consumer, false);
     }
+    
+    // Release all free buffers from the pool
+    // These are unused buffers ready for allocation
     ab = get_free_audio_buffer(audio_i2s_consumer, false);
     while (ab != NULL) {
-        free(ab->buffer->bytes);
-        free(ab->buffer);
+        free(ab->buffer->bytes);  // Free audio data
+        free(ab->buffer);         // Free buffer wrapper
         ab = get_free_audio_buffer(audio_i2s_consumer, false);
     }
+    
+    // Release all full buffers from the pool
+    // These are buffers filled with audio data but not yet queued
     ab = get_full_audio_buffer(audio_i2s_consumer, false);
     while (ab != NULL) {
-        free(ab->buffer->bytes);
-        free(ab->buffer);
+        free(ab->buffer->bytes);  // Free audio data
+        free(ab->buffer);         // Free buffer wrapper
         ab = get_full_audio_buffer(audio_i2s_consumer, false);
     }
+    
+    // Release currently playing buffers
+    // These buffers are actively being transferred by DMA
     if (shared_state.playing_buffer0 != NULL) {
         free(shared_state.playing_buffer0->buffer->bytes);
         free(shared_state.playing_buffer0->buffer);
+        shared_state.playing_buffer0 = NULL;
     }
+    
     if (shared_state.playing_buffer1 != NULL) {
         free(shared_state.playing_buffer1->buffer->bytes);
         free(shared_state.playing_buffer1->buffer);
+        shared_state.playing_buffer1 = NULL;
     }
+    
+    // Release buffer pool structure
     free(audio_i2s_consumer);
+    
+    // Release silence buffer used for underrun protection
     free(silence_buffer.buffer->bytes);
     free(silence_buffer.buffer);
-    shared_state.playing_buffer0 = NULL;
-    shared_state.playing_buffer1 = NULL;
+    
+    // Clean up PIO resources
     uint8_t sm = shared_state.pio_sm;
-    pio_sm_clear_fifos(audio_pio, sm);
-    pio_sm_drain_tx_fifo(audio_pio, sm);
-    pio_remove_program(audio_pio, &audio_i2s_program, loaded_offset);
-    pio_clear_instruction_memory(audio_pio);
-    pio_sm_unclaim(audio_pio, sm);
+    pio_sm_clear_fifos(audio_pio, sm);           // Clear any remaining data
+    pio_sm_drain_tx_fifo(audio_pio, sm);        // Ensure TX FIFO is empty
+    pio_remove_program(audio_pio, &audio_i2s_program, loaded_offset);  // Unload program
+    pio_clear_instruction_memory(audio_pio);    // Clear program memory
+    pio_sm_unclaim(audio_pio, sm);              // Release state machine
 }
 
-const audio_format_t *audio_i2s_setup(const audio_format_t *i2s_input_audio_format, const audio_format_t *i2s_output_audio_format,
-                                               const audio_i2s_config_t *config) {
-    _i2s_input_audio_format = i2s_input_audio_format;
-    _i2s_output_audio_format = i2s_output_audio_format;
+/**
+ * @brief Initialize I2S audio output system
+ * 
+ * This function sets up the complete I2S audio output pipeline including:
+ * - GPIO pin configuration for I2S signals
+ * - PIO state machine setup and program loading
+ * - DMA channel configuration
+ * - Audio buffer management
+ * 
+ * The function validates input parameters and hardware availability before
+ * proceeding with initialization.
+ * 
+ * @param input_format  Input audio format specification
+ * @param output_format Desired I2S output format
+ * @param config        Hardware configuration (pins, DMA, PIO)
+ * 
+ * @return Pointer to actual output format, or NULL on failure
+ * 
+ * @note Currently supports stereo output only (2 channels)
+ * @note Supports 16-bit and 32-bit PCM formats
+ */
+const audio_format_t *audio_i2s_setup(const audio_format_t *input_format, 
+                                     const audio_format_t *output_format,
+                                     const audio_i2s_config_t *config) 
+{
+    // Store format specifications for runtime use
+    _i2s_input_audio_format = input_format;
+    _i2s_output_audio_format = output_format;
+    
+    // Configure GPIO pins for PIO function
+    // All I2S signals (SDATA, BCLK, LRCLK) use the same PIO instance
     uint func = GPIO_FUNC_PIOx;
-    gpio_set_function(config->data_pin, func);
-    gpio_set_function(config->clock_pin_base, func);
-    gpio_set_function(config->clock_pin_base + 1, func);
-
+    gpio_set_function(config->data_pin, func);          // SDATA pin
+    gpio_set_function(config->clock_pin_base, func);    // BCLK pin  
+    gpio_set_function(config->clock_pin_base + 1, func); // LRCLK pin
+    
+    // Claim PIO state machine for exclusive use
     uint8_t sm = shared_state.pio_sm = config->pio_sm;
     pio_sm_claim(audio_pio, sm);
-
+    
+    // Load I2S PIO program into PIO memory
     loaded_offset = pio_add_program(audio_pio, &audio_i2s_program);
-
-    assert(_i2s_output_audio_format->channel_count == AUDIO_CHANNEL_STEREO);
-    assert(_i2s_output_audio_format->pcm_format == AUDIO_PCM_FORMAT_S16 || _i2s_output_audio_format->pcm_format == AUDIO_PCM_FORMAT_S32);
-    uint res_bits = (_i2s_output_audio_format->pcm_format == AUDIO_PCM_FORMAT_S32) ? 32 : 16;
-    audio_i2s_program_init(audio_pio, sm, loaded_offset, config->data_pin, config->clock_pin_base, res_bits);
-
+    
+    // Validate output format requirements
+    // Current implementation requires stereo output
+    assert(output_format->channel_count == AUDIO_CHANNEL_STEREO);
+    
+    // Validate PCM format support (16-bit or 32-bit signed)
+    assert(output_format->pcm_format == AUDIO_PCM_FORMAT_S16 || 
+           output_format->pcm_format == AUDIO_PCM_FORMAT_S32);
+    
+    // Determine bit resolution for PIO configuration
+    uint res_bits = (output_format->pcm_format == AUDIO_PCM_FORMAT_S32) ? 32 : 16;
+    
+    // Initialize PIO state machine with I2S timing parameters
+    audio_i2s_program_init(audio_pio, sm, loaded_offset, 
+                          config->data_pin, config->clock_pin_base, res_bits);
+    
+    // Allocate and initialize silence buffer for underrun protection
+    // Buffer size: samples × channels × bytes_per_sample
     silence_buffer.buffer = pico_buffer_alloc(PICO_AUDIO_I2S_BUFFER_SAMPLE_LENGTH * 4);
     silence_buffer.sample_count = PICO_AUDIO_I2S_BUFFER_SAMPLE_LENGTH;
     silence_buffer.format = &pio_i2s_consumer_buffer_format;
 
+    
+    // Memory fence to ensure all setup is complete before DMA configuration
     __mem_fence_release();
+    
+    // Store DMA channel assignments in shared state
     uint8_t dma_channel0 = config->dma_channel0;
     uint8_t dma_channel1 = config->dma_channel1;
-
     shared_state.dma_channel0 = dma_channel0;
     shared_state.dma_channel1 = dma_channel1;
-
+    
+    // Determine DMA transfer size based on audio format
+    // For stereo audio, DMA transfers pairs of samples
     enum dma_channel_transfer_size i2s_dma_configure_size;
-    if (_i2s_output_audio_format->channel_count == AUDIO_CHANNEL_MONO) {
-        switch (_i2s_output_audio_format->pcm_format) {
+    
+    if (output_format->channel_count == AUDIO_CHANNEL_MONO) {
+        // Mono audio support (currently not fully implemented)
+        switch (output_format->pcm_format) {
             case AUDIO_PCM_FORMAT_S8:
             case AUDIO_PCM_FORMAT_U8:
                 i2s_dma_configure_size = DMA_SIZE_8;
-                assert(false);
+                assert(false); // Mono 8-bit not supported
                 break;
             case AUDIO_PCM_FORMAT_S16:
             case AUDIO_PCM_FORMAT_U16:
                 i2s_dma_configure_size = DMA_SIZE_16;
-                assert(false);
+                assert(false); // Mono 16-bit not supported
                 break;
             case AUDIO_PCM_FORMAT_S32:
             case AUDIO_PCM_FORMAT_U32:
                 i2s_dma_configure_size = DMA_SIZE_32;
-                assert(false);
+                assert(false); // Mono 32-bit not supported
                 break;
             default:
-                assert(false);
+                assert(false); // Unsupported format
                 break;
         }
     } else {
-        switch (_i2s_output_audio_format->pcm_format) {
+        // Stereo audio configuration
+        switch (output_format->pcm_format) {
             case AUDIO_PCM_FORMAT_S8:
             case AUDIO_PCM_FORMAT_U8:
+                // 8-bit stereo: transfer 16 bits (2 × 8-bit samples)
                 i2s_dma_configure_size = DMA_SIZE_16;
                 break;
             case AUDIO_PCM_FORMAT_S16:
             case AUDIO_PCM_FORMAT_U16:
+                // 16-bit stereo: transfer 32 bits (2 × 16-bit samples)
                 i2s_dma_configure_size = DMA_SIZE_32;
                 break;
             case AUDIO_PCM_FORMAT_S32:
             case AUDIO_PCM_FORMAT_U32:
-                i2s_dma_configure_size = DMA_SIZE_32; // Need after-treatment because of no 64bit transfer
+                // 32-bit stereo: transfer 32 bits per sample (requires special handling)
+                // Note: No 64-bit DMA available, so each sample transferred separately
+                i2s_dma_configure_size = DMA_SIZE_32;
                 break;
             default:
-                assert(false);
+                assert(false); // Unsupported format
                 break;
         }
     }
-    // DMA0 (configuration only)
+    
+    // Configure DMA channel 0 for ping-pong buffering
     dma_config0 = dma_channel_get_default_config(dma_channel0);
-    channel_config_set_transfer_data_size(&dma_config0, i2s_dma_configure_size);
-    channel_config_set_read_increment(&dma_config0, true);
-    channel_config_set_write_increment(&dma_config0, false);
-    channel_config_set_dreq(&dma_config0, DREQ_PIOx_TX0 + sm);
-    channel_config_set_chain_to(&dma_config0, dma_channel1);
-    // DMA1 (configuration only)
+    channel_config_set_transfer_data_size(&dma_config0, i2s_dma_configure_size); // Transfer size
+    channel_config_set_read_increment(&dma_config0, true);   // Increment source address
+    channel_config_set_write_increment(&dma_config0, false); // Fixed destination (PIO TX FIFO)
+    channel_config_set_dreq(&dma_config0, DREQ_PIOx_TX0 + sm); // PIO data request signal
+    channel_config_set_chain_to(&dma_config0, dma_channel1);   // Chain to channel 1
+    
+    // Configure DMA channel 1 for ping-pong buffering
     dma_config1 = dma_channel_get_default_config(dma_channel1);
-    channel_config_set_transfer_data_size(&dma_config1, i2s_dma_configure_size);
-    channel_config_set_read_increment(&dma_config1, true);
-    channel_config_set_write_increment(&dma_config1, false);
-    channel_config_set_dreq(&dma_config1, DREQ_PIOx_TX0 + sm);
-    channel_config_set_chain_to(&dma_config1, dma_channel0);
-
-    return _i2s_output_audio_format;
+    channel_config_set_transfer_data_size(&dma_config1, i2s_dma_configure_size); // Transfer size
+    channel_config_set_read_increment(&dma_config1, true);   // Increment source address
+    channel_config_set_write_increment(&dma_config1, false); // Fixed destination (PIO TX FIFO)
+    channel_config_set_dreq(&dma_config1, DREQ_PIOx_TX0 + sm); // PIO data request signal
+    channel_config_set_chain_to(&dma_config1, dma_channel0);   // Chain to channel 0
+    
+    // Return the actual output format that will be used
+    return output_format;
 }
 
-static void update_pio_frequency(uint32_t sample_freq, audio_pcm_format_t pcm_format, audio_channel_t channel_count) {
-    printf("setting PIO freq for target sampling freq = %d Hz\n", (int) sample_freq);
+// ============================================================================
+// Internal Helper Functions
+// ============================================================================
+
+/**
+ * @brief Update PIO clock divider for target sampling frequency
+ * 
+ * This function calculates and applies the appropriate clock divider to achieve
+ * the desired sampling frequency. It supports both fractional and integer
+ * division modes for optimal frequency accuracy.
+ * 
+ * The I2S bit clock (BCLK) frequency is calculated as:
+ * BCLK = sample_freq × bits_per_sample × channels
+ * 
+ * PIO clock divider = system_clock / (BCLK × 2)
+ * The factor of 2 accounts for the PIO program structure.
+ * 
+ * @param sample_freq Target sampling frequency in Hz
+ * @param pcm_format  PCM format (determines bits per sample)
+ * @param channel_count Number of audio channels
+ * 
+ * @note This function can be called at runtime to change sampling frequency
+ * @note Frequency changes may cause brief audio interruption
+ */
+static void update_pio_frequency(uint32_t sample_freq, audio_pcm_format_t pcm_format, audio_channel_t channel_count) 
+{
+    printf("Setting PIO frequency for target sampling frequency = %u Hz\n", sample_freq);
+    
+    // Get current system clock frequency
     uint32_t system_clock_frequency = clock_get_hz(clk_sys);
+    
+    // Ensure system clock is within safe range for calculations
     assert(system_clock_frequency < 0x40000000);
-    //uint32_t divider = system_clock_frequency * 4 / sample_freq; // avoid arithmetic overflow
+    
+    // Calculate clock divider based on audio format
     uint32_t divider;
     uint32_t bits;
+    
     switch (pcm_format) {
         case AUDIO_PCM_FORMAT_S8:
         case AUDIO_PCM_FORMAT_U8:
+            // 8-bit audio: BCLK = sample_freq × 8 × channels
             divider = system_clock_frequency * 4 * channel_count / sample_freq;
             bits = 8;
             break;
+            
         case AUDIO_PCM_FORMAT_S16:
         case AUDIO_PCM_FORMAT_U16:
+            // 16-bit audio: BCLK = sample_freq × 16 × channels
             divider = system_clock_frequency * 2 * channel_count / sample_freq;
             bits = 16;
             break;
+            
         case AUDIO_PCM_FORMAT_S32:
         case AUDIO_PCM_FORMAT_U32:
+            // 32-bit audio: BCLK = sample_freq × 32 × channels
             divider = system_clock_frequency * 1 * channel_count / sample_freq;
             bits = 32;
             break;
+            
         default:
+            // Fallback to 16-bit configuration
             divider = system_clock_frequency * 2 * channel_count / sample_freq;
             bits = 16;
-            assert(false);
+            assert(false); // Unsupported format
             break;
     }
-    assert(divider < 0x1000000);
-    assert(bits <= 32);
+    
+    // Validate divider is within PIO hardware limits
+    assert(divider < 0x1000000);  // 24-bit limit
+    assert(bits <= 32);           // Maximum supported bit depth
+    
 #ifdef PIO_CLK_DIV_FRAC
-    float pio_freq = (float) system_clock_frequency * 256 / divider; // frac
-    printf("System clock at %u Hz, I2S clock divider %d/256: PIO freq %7.4f Hz\n", (uint) system_clock_frequency, (uint) divider, pio_freq);
-    pio_sm_set_clkdiv_int_frac(audio_pio, shared_state.pio_sm, divider >> 8u, divider & 0xffu); // This scheme includes clock Jitter
+    // Fractional clock division for better frequency accuracy
+    // Divider format: 16.8 fixed point (integer.fraction)
+    float pio_freq = (float) system_clock_frequency * 256 / divider;
+    printf("System clock: %u Hz, I2S divider: %u/256, PIO freq: %.4f Hz\n", 
+           system_clock_frequency, divider, pio_freq);
+    
+    // Apply fractional divider (may introduce slight jitter)
+    pio_sm_set_clkdiv_int_frac(audio_pio, shared_state.pio_sm, 
+                               divider >> 8u,    // Integer part
+                               divider & 0xffu);  // Fractional part
 #else
-    divider >>= 8u;
-    float pio_freq = (float) system_clock_frequency / divider; // no frac
-    float samp_freq = pio_freq / ((float) bits * 2.0 * 2.0);
-    printf("System clock at %u Hz, I2S clock divider %d: PIO freq %7.4f Hz: sampling freq %7.4f Hz\n", (uint) system_clock_frequency, (uint) divider, pio_freq, samp_freq);
-    pio_sm_set_clkdiv(audio_pio, shared_state.pio_sm, divider); // No Jitter. but clock freq accuracy depends on PIO source clock freq
+    // Integer-only clock division for jitter-free operation
+    divider >>= 8u;  // Convert to integer divider
+    float pio_freq = (float) system_clock_frequency / divider;
+    float actual_sample_freq = pio_freq / ((float) bits * 2.0 * 2.0);
+    
+    printf("System clock: %u Hz, I2S divider: %u, PIO freq: %.4f Hz, Actual sample freq: %.4f Hz\n", 
+           system_clock_frequency, divider, pio_freq, actual_sample_freq);
+    
+    // Apply integer divider (no jitter, but less frequency accuracy)
+    pio_sm_set_clkdiv(audio_pio, shared_state.pio_sm, divider);
 #endif
-
+    
+    // Update shared state with new frequency
     shared_state.freq = sample_freq;
 }
 

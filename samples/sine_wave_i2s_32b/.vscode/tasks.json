@@ -13,9 +13,9 @@
             ],
             "options": {
                 "env": {
-                    "PICO_SDK_PATH": "/Users/tsugumasayutani/.pico-sdk/sdk/2.1.1",
-                    "PICO_EXTRAS_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/libs/pico-extras",
-                    "PICO_EXAMPLES_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-examples"
+                    "PICO_SDK_PATH": "${env:PICO_SDK_PATH}",
+                    "PICO_EXTRAS_PATH": "${workspaceFolder}/../../libs/pico-extras",
+                    "PICO_EXAMPLES_PATH": "${workspaceFolder}/../../pico-examples"
                 }
             },
             "group": "build",
@@ -34,9 +34,9 @@
             "args": ["-C", "build", "-j4"],
             "options": {
                 "env": {
-                    "PICO_SDK_PATH": "/Users/tsugumasayutani/.pico-sdk/sdk/2.1.1",
-                    "PICO_EXTRAS_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/libs/pico-extras",
-                    "PICO_EXAMPLES_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-examples"
+                    "PICO_SDK_PATH": "${env:PICO_SDK_PATH}",
+                    "PICO_EXTRAS_PATH": "${workspaceFolder}/../../libs/pico-extras",
+                    "PICO_EXAMPLES_PATH": "${workspaceFolder}/../../pico-examples"
                 }
             },
             "group": {
@@ -54,7 +54,7 @@
         {
             "label": "Upload to Pico 2",
             "type": "shell",
-            "command": "/Users/tsugumasayutani/.pico-sdk/picotool/2.1.1/picotool/picotool",
+            "command": "picotool",
             "args": [
                 "load",
                 "build/sine_wave_i2s_32b.uf2",
@@ -62,9 +62,9 @@
             ],
             "options": {
                 "env": {
-                    "PICO_SDK_PATH": "/Users/tsugumasayutani/.pico-sdk/sdk/2.1.1",
-                    "PICO_EXTRAS_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/libs/pico-extras",
-                    "PICO_EXAMPLES_PATH": "/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-examples"
+                    "PICO_SDK_PATH": "${env:PICO_SDK_PATH}",
+                    "PICO_EXTRAS_PATH": "${workspaceFolder}/../../libs/pico-extras",
+                    "PICO_EXAMPLES_PATH": "${workspaceFolder}/../../pico-examples"
                 }
             },
             "group": "build",
@@ -83,8 +83,15 @@
             "command": "bash",
             "args": [
                 "-c",
-                "rm -rf build && mkdir build && PICO_SDK_PATH=/Users/tsugumasayutani/.pico-sdk/sdk/2.1.1 PICO_EXTRAS_PATH=/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/libs/pico-extras PICO_EXAMPLES_PATH=/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-examples cmake -B build -DPICO_PLATFORM=rp2350 -DPICO_BOARD=pico2 . && PICO_SDK_PATH=/Users/tsugumasayutani/.pico-sdk/sdk/2.1.1 PICO_EXTRAS_PATH=/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/libs/pico-extras PICO_EXAMPLES_PATH=/Users/tsugumasayutani/Documents/GitHub/pico_audio_i2s_32b/pico-examples make -C build -j4 && /Users/tsugumasayutani/.pico-sdk/picotool/2.1.1/picotool/picotool load build/sine_wave_i2s_32b.uf2 -fx"
+                "rm -rf build && mkdir build && cmake -B build -DPICO_PLATFORM=rp2350 -DPICO_BOARD=pico2 . && make -C build -j4 && picotool load build/sine_wave_i2s_32b.uf2 -fx"
             ],
+            "options": {
+                "env": {
+                    "PICO_SDK_PATH": "${env:PICO_SDK_PATH}",
+                    "PICO_EXTRAS_PATH": "${workspaceFolder}/../../libs/pico-extras",
+                    "PICO_EXAMPLES_PATH": "${workspaceFolder}/../../pico-examples"
+                }
+            },
             "group": "build",
             "presentation": {
                 "echo": true,

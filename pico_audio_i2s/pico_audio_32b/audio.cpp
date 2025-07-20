@@ -5,72 +5,164 @@
  */
 
 // Modified by Elehobica, 2021
+// Enhanced with comprehensive documentation by Claude, 2025
 
-#include <cstring>
-#include "pico/audio.h"
-#include "pico/sample_conversion.h"
+/**
+ * @file audio.cpp
+ * @brief Audio Buffer Management and Sample Conversion for Pico Audio
+ * 
+ * This file implements the core audio buffer management system for Raspberry Pi Pico
+ * audio applications. It provides:
+ * 
+ * - Thread-safe audio buffer pools
+ * - Sample format conversion between different PCM formats
+ * - Buffer allocation and recycling
+ * - Connection management between audio producers and consumers
+ * 
+ * The buffer management system uses linked lists with careful locking to ensure
+ * thread safety while maintaining low latency for real-time audio processing.
+ */
 
-// ======================
-// == DEBUGGING =========
+// ============================================================================
+// System Includes
+// ============================================================================
 
+#include <cstring>              // For memory operations
+#include "pico/audio.h"         // Audio framework definitions
+#include "pico/sample_conversion.h"  // Sample format conversion utilities
+
+// ============================================================================
+// Debug Configuration
+// ============================================================================
+
+/**
+ * @brief Enable audio-specific assertions for debug builds
+ * 
+ * When enabled, provides additional validation checks for audio buffer
+ * operations. Disable in release builds for optimal performance.
+ */
 #define ENABLE_AUDIO_ASSERTIONS
 
 #ifdef ENABLE_AUDIO_ASSERTIONS
+/**
+ * @brief Audio-specific assertion macro
+ * 
+ * Provides assertion checking specifically for audio operations.
+ * Can be independently controlled from general system assertions.
+ */
 #define audio_assert(x) assert(x)
 #else
 #define audio_assert(x) (void)0
 #endif
 
-inline static audio_buffer_t *list_remove_head(audio_buffer_t **phead) {
+// ============================================================================
+// Internal Buffer List Management
+// ============================================================================
+
+/**
+ * @brief Remove and return the first buffer from a linked list
+ * 
+ * This function atomically removes the head buffer from a singly-linked
+ * list of audio buffers. The removed buffer's next pointer is set to NULL.
+ * 
+ * @param phead Pointer to the list head pointer
+ * @return Removed buffer, or NULL if list was empty
+ * 
+ * @note This function is not thread-safe by itself - caller must provide
+ *       appropriate synchronization.
+ */
+inline static audio_buffer_t *list_remove_head(audio_buffer_t **phead) 
+{
     audio_buffer_t *ab = *phead;
-
+    
     if (ab) {
-        *phead = ab->next;
-        ab->next = NULL;
+        *phead = ab->next;  // Update head to next buffer
+        ab->next = NULL;    // Disconnect removed buffer
     }
-
+    
     return ab;
 }
 
+/**
+ * @brief Remove head buffer from a list with tail tracking
+ * 
+ * Similar to list_remove_head(), but also maintains a tail pointer
+ * for efficient append operations. When the last buffer is removed,
+ * the tail pointer is also set to NULL.
+ * 
+ * @param phead Pointer to the list head pointer
+ * @param ptail Pointer to the list tail pointer
+ * @return Removed buffer, or NULL if list was empty
+ * 
+ * @note Tail pointer consistency is validated in debug builds
+ */
 inline static audio_buffer_t *list_remove_head_with_tail(audio_buffer_t **phead,
-                                                              audio_buffer_t **ptail) {
+                                                        audio_buffer_t **ptail) 
+{
     audio_buffer_t *ab = *phead;
-
+    
     if (ab) {
-        *phead = ab->next;
-
+        *phead = ab->next;  // Update head to next buffer
+        
         if (!ab->next) {
-            audio_assert(*ptail == ab);
+            // Removing the last buffer - update tail pointer
+            audio_assert(*ptail == ab);  // Verify tail consistency
             *ptail = NULL;
         } else {
-            ab->next = NULL;
+            ab->next = NULL;  // Disconnect removed buffer
         }
     }
-
+    
     return ab;
 }
 
-inline static void list_prepend(audio_buffer_t **phead, audio_buffer_t *ab) {
-    audio_assert(ab->next == NULL);
-    audio_assert(ab != *phead);
-    ab->next = *phead;
-    *phead = ab;
+/**
+ * @brief Add a buffer to the beginning of a linked list
+ * 
+ * Inserts the specified buffer at the head of the list. The buffer
+ * must not already be part of any list (next pointer must be NULL).
+ * 
+ * @param phead Pointer to the list head pointer
+ * @param ab    Buffer to prepend
+ * 
+ * @note Debug builds verify buffer is not already in a list
+ */
+inline static void list_prepend(audio_buffer_t **phead, audio_buffer_t *ab) 
+{
+    audio_assert(ab->next == NULL);  // Buffer must not be in a list
+    audio_assert(ab != *phead);      // Buffer cannot be the current head
+    
+    ab->next = *phead;  // Point to current head
+    *phead = ab;        // Update head to new buffer
 }
 
-// todo add a tail for these already sorted lists as we generally insert on the end
+/**
+ * @brief Add a buffer to the end of a list with tail tracking
+ * 
+ * Efficiently appends a buffer to the end of a linked list using
+ * a tail pointer to avoid traversing the entire list. If the list
+ * is empty, both head and tail are set to the new buffer.
+ * 
+ * @param phead Pointer to the list head pointer
+ * @param ptail Pointer to the list tail pointer  
+ * @param ab    Buffer to append
+ * 
+ * @note This provides O(1) append operations when tail is maintained
+ */
 inline static void list_append_with_tail(audio_buffer_t **phead, audio_buffer_t **ptail,
-                                         audio_buffer_t *ab) {
-    audio_assert(ab->next == NULL);
-    audio_assert(ab != *phead);
-    audio_assert(ab != *ptail);
-
+                                        audio_buffer_t *ab) 
+{
+    audio_assert(ab->next == NULL);  // Buffer must not be in a list
+    audio_assert(ab != *phead);      // Buffer cannot be current head
+    audio_assert(ab != *ptail);      // Buffer cannot be current tail
+    
     if (!*phead) {
-        audio_assert(!*ptail);
+        // List is empty - buffer becomes both head and tail
+        audio_assert(!*ptail);  // Tail should also be NULL
         *ptail = ab;
-        // insert at the beginning
         list_prepend(phead, ab);
     } else {
-        // insert at end
+        // List not empty - append to end
         (*ptail)->next = ab;
         *ptail = ab;
     }
@@ -89,24 +181,62 @@ audio_buffer_t *get_free_audio_buffer(audio_buffer_pool_t *context, bool block) 
     return ab;
 }
 
-void queue_free_audio_buffer(audio_buffer_pool_t *context, audio_buffer_t *ab) {
-    assert(!ab->next);
+/**
+ * @brief Return a buffer to the free pool
+ * 
+ * Makes a previously allocated buffer available for reuse by adding it
+ * back to the free list. This will wake any threads waiting for buffers.
+ * 
+ * @param context Buffer pool to return buffer to
+ * @param ab      Buffer to return (must not be in any list)
+ * 
+ * @note Buffer must not be linked to other buffers (next pointer must be NULL)
+ * @note This function is thread-safe and will signal waiting threads
+ */
+void queue_free_audio_buffer(audio_buffer_pool_t *context, audio_buffer_t *ab) 
+{
+    assert(!ab->next);  // Buffer must not be in a list
+    
+    // Atomically add buffer back to free list
     uint32_t save = spin_lock_blocking(context->free_list_spin_lock);
     list_prepend(&context->free_list, ab);
     spin_unlock(context->free_list_spin_lock, save);
+    
+    // Signal that a buffer is now available
     __sev();
 }
 
-audio_buffer_t *get_full_audio_buffer(audio_buffer_pool_t *context, bool block) {
+/**
+ * @brief Get a buffer filled with audio data
+ * 
+ * Retrieves a buffer that has been filled with audio data and is ready
+ * for processing or output. This is typically used by audio consumers
+ * to get the next buffer to play.
+ * 
+ * @param context Buffer pool to get buffer from
+ * @param block   If true, wait for buffer availability; if false, return NULL immediately
+ * @return Buffer with audio data, or NULL if none available and block=false
+ * 
+ * @note This function is thread-safe and uses spin locks for synchronization
+ * @note Uses tail tracking for efficient O(1) removal from prepared list
+ */
+audio_buffer_t *get_full_audio_buffer(audio_buffer_pool_t *context, bool block) 
+{
     audio_buffer_t *ab;
-
+    
     do {
+        // Atomically remove a buffer from the prepared list
         uint32_t save = spin_lock_blocking(context->prepared_list_spin_lock);
         ab = list_remove_head_with_tail(&context->prepared_list, &context->prepared_list_tail);
         spin_unlock(context->prepared_list_spin_lock, save);
+        
+        // Return buffer if found, or if non-blocking mode
         if (ab || !block) break;
+        
+        // Wait for event (buffer to become available)
         __wfe();
     } while (true);
+    
     return ab;
 }
 

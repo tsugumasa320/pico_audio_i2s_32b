@@ -12,7 +12,7 @@ This is a 32-bit I2S DAC library for Raspberry Pi Pico/Pico 2, supporting stereo
 - Set environment variable: `PICO_SDK_PATH` (pointing to external pico-sdk)
 - Confirmed with pico-sdk 2.1.1
 - Note: pico-extras is included in libs/pico-extras/ within the repository
-- PICO_EXAMPLES_PATH is not required
+- pico-examples is included in pico-examples/ within the repository
 
 ### Windows (Developer Command Prompt for VS 2022)
 ```bash
@@ -120,9 +120,8 @@ update_pio_frequency(new_freq, pcm_format, channel_count);
 #### 環境変数の優先順位
 ```bash
 # 正しい設定例
-PICO_SDK_PATH="/path/to/sdk/2.1.1"
-PICO_EXTRAS_PATH="./libs/pico-extras"  # プロジェクト内
-PICO_EXAMPLES_PATH="./pico-examples"   # プロジェクト内
+export PICO_SDK_PATH="/path/to/pico-sdk"  # 外部SDKへのパス
+# PICO_EXTRAS_PATHとPICO_EXAMPLES_PATHはプロジェクト内に含まれているため設定不要
 ```
 
 ### デバッグとトラブルシューティング
@@ -161,12 +160,10 @@ PICO_EXAMPLES_PATH="./pico-examples"   # プロジェクト内
 - **設定マクロ**: 使用例と推奨値の記載
 - **エラー処理**: assert()での前提条件チェック
 
-#### テストコードの活用
+#### サンプルコードの活用
 ```cpp
-// samples/sine_wave_i2s_32b/ 内のテストファイル
-sine_wave_fixed.cpp      // 歪み修正版
-test_minimal.cpp         // 最小構成テスト
-test_comprehensive.cpp   // 包括的機能テスト
+// samples/sine_wave_i2s_32b/ 内のサンプルファイル
+sine_wave.cpp           // メインのサイン波生成サンプル
 ```
 
 ### 今後の開発指針
