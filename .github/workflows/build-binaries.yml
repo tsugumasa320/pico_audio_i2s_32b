@@ -4,9 +4,14 @@
 # refer to https://opensource.org/licenses/BSD-2-Clause
 #------------------------------------------------------
 
-name: Build
+name: Build Binaries
 
-on: [push, pull_request]
+on: 
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   build-binaries:
@@ -38,6 +43,16 @@ jobs:
           board: ${{ matrix.board }}
           identifier: ${{ matrix.board}}
           output_path: ${{ env.RELEASE_DIR }}
+      - name: Analyze binary size
+        run: |
+          echo "=== Binary Analysis for ${{ matrix.board }} ===" 
+          if [ -f "${{ env.RELEASE_DIR }}/sine_wave_i2s_32b_${{ matrix.board }}.elf" ]; then
+            arm-none-eabi-size "${{ env.RELEASE_DIR }}/sine_wave_i2s_32b_${{ matrix.board }}.elf"
+            echo ""
+            echo "Top symbols by size:"
+            arm-none-eabi-nm --size-sort "${{ env.RELEASE_DIR }}/sine_wave_i2s_32b_${{ matrix.board }}.elf" | tail -10
+          fi
+
       - name: Upload production artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -45,6 +60,7 @@ jobs:
           path: |
             ${{ env.RELEASE_DIR }}/*.uf2
             ${{ env.RELEASE_DIR }}/*.elf
+          retention-days: 30
 
   release-tag-condition:
     runs-on: ubuntu-latest

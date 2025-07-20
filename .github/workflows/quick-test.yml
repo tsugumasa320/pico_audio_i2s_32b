@@ -1,0 +1,86 @@
+#------------------------------------------------------
+# Copyright (c) 2025, Elehobica
+# Released under the BSD-2-Clause
+# refer to https://opensource.org/licenses/BSD-2-Clause
+#------------------------------------------------------
+
+name: Quick Test
+
+on:
+  workflow_dispatch:  # 手動実行専用
+    inputs:
+      platform:
+        description: 'Target platform'
+        required: true
+        default: 'rp2040'
+        type: choice
+        options:
+        - rp2040
+        - rp2350
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+        - Release
+        - Debug
+        - MinSizeRel
+
+jobs:
+  quick-build:
+    name: Quick Build Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set board based on platform
+        id: set_board
+        run: |
+          if [ "${{ inputs.platform }}" == "rp2350" ]; then
+            echo "board=pico2" >> $GITHUB_OUTPUT
+          else
+            echo "board=pico" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Quick build
+        uses: elehobica/build-pico@v1
+        with:
+          path: samples/sine_wave_i2s_32b
+          build: build_quick
+          platform: ${{ inputs.platform }}
+          board: ${{ steps.set_board.outputs.board }}
+          cmake_options: -DCMAKE_BUILD_TYPE=${{ inputs.build_type }}
+
+      - name: Verify build
+        run: |
+          BUILD_DIR="samples/sine_wave_i2s_32b/build_quick"
+          echo "=== Quick Build Verification ==="
+          
+          if [ -f "$BUILD_DIR/sine_wave_i2s_32b.uf2" ]; then
+            echo "✅ UF2 file generated successfully"
+            ls -lh "$BUILD_DIR/sine_wave_i2s_32b.uf2"
+          else
+            echo "❌ UF2 file not found"
+            exit 1
+          fi
+          
+          if [ -f "$BUILD_DIR/sine_wave_i2s_32b.elf" ]; then
+            echo "✅ ELF file generated successfully"
+            arm-none-eabi-size "$BUILD_DIR/sine_wave_i2s_32b.elf"
+          else
+            echo "❌ ELF file not found"
+            exit 1
+          fi
+
+      - name: Upload quick test result
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-test-${{ inputs.platform }}-${{ inputs.build_type }}
+          path: |
+            samples/sine_wave_i2s_32b/build_quick/*.uf2
+            samples/sine_wave_i2s_32b/build_quick/*.elf
+          retention-days: 7

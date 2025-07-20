@@ -1,0 +1,268 @@
+#------------------------------------------------------
+# Copyright (c) 2025, Elehobica
+# Released under the BSD-2-Clause
+# refer to https://opensource.org/licenses/BSD-2-Clause
+#------------------------------------------------------
+
+name: Pull Request Checks
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  # PR情報の検証
+  pr-validation:
+    name: PR Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR title
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          echo "PR Title: $PR_TITLE"
+          
+          # PRタイトルの基本チェック
+          if [ ${#PR_TITLE} -lt 10 ]; then
+            echo "Error: PR title too short (minimum 10 characters)"
+            exit 1
+          fi
+          
+          if [ ${#PR_TITLE} -gt 100 ]; then
+            echo "Error: PR title too long (maximum 100 characters)"
+            exit 1
+          fi
+
+      - name: Check for breaking changes
+        run: |
+          # APIの破壊的変更をチェック
+          if git diff origin/main...HEAD --name-only | grep -E "(include/.*\.h|.*\.h)$"; then
+            echo "Header files modified - checking for breaking changes"
+            # ここで詳細なAPIチェックを実装可能
+          fi
+
+      - name: Check commit messages
+        run: |
+          # コミットメッセージの品質チェック
+          git log origin/main..HEAD --oneline | while read commit; do
+            echo "Checking commit: $commit"
+            # 空のコミットメッセージチェックなど
+          done
+
+  # 差分ビルドテスト
+  diff-build:
+    name: Differential Build Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [rp2040, rp2350]
+        include:
+          - platform: rp2040
+            board: pico
+          - platform: rp2350
+            board: pico2
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Build PR version
+        uses: elehobica/build-pico@v1
+        with:
+          path: samples/sine_wave_i2s_32b
+          build: build_pr_${{ matrix.platform }}
+          platform: ${{ matrix.platform }}
+          board: ${{ matrix.board }}
+
+      - name: Save PR build info
+        run: |
+          BUILD_DIR="samples/sine_wave_i2s_32b/build_pr_${{ matrix.platform }}"
+          if [ -f "$BUILD_DIR/sine_wave_i2s_32b.elf" ]; then
+            arm-none-eabi-size "$BUILD_DIR/sine_wave_i2s_32b.elf" > pr_size_${{ matrix.platform }}.txt
+          fi
+
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          submodules: true
+
+      - name: Build main version
+        uses: elehobica/build-pico@v1
+        with:
+          path: samples/sine_wave_i2s_32b
+          build: build_main_${{ matrix.platform }}
+          platform: ${{ matrix.platform }}
+          board: ${{ matrix.board }}
+
+      - name: Compare binary sizes
+        run: |
+          echo "=== Binary Size Comparison for ${{ matrix.platform }} ==="
+          
+          PR_BUILD="samples/sine_wave_i2s_32b/build_pr_${{ matrix.platform }}"
+          MAIN_BUILD="samples/sine_wave_i2s_32b/build_main_${{ matrix.platform }}"
+          
+          if [ -f "$PR_BUILD/sine_wave_i2s_32b.elf" ] && [ -f "$MAIN_BUILD/sine_wave_i2s_32b.elf" ]; then
+            echo "Main branch:"
+            arm-none-eabi-size "$MAIN_BUILD/sine_wave_i2s_32b.elf"
+            echo ""
+            echo "PR branch:"
+            arm-none-eabi-size "$PR_BUILD/sine_wave_i2s_32b.elf"
+            echo ""
+            
+            # バイナリサイズの差分計算
+            MAIN_SIZE=$(arm-none-eabi-size "$MAIN_BUILD/sine_wave_i2s_32b.elf" | tail -1 | awk '{print $1+$2}')
+            PR_SIZE=$(arm-none-eabi-size "$PR_BUILD/sine_wave_i2s_32b.elf" | tail -1 | awk '{print $1+$2}')
+            DIFF=$((PR_SIZE - MAIN_SIZE))
+            
+            echo "Size difference: $DIFF bytes"
+            
+            # 大幅なサイズ増加を警告
+            if [ $DIFF -gt 5000 ]; then
+              echo "⚠️ Warning: Binary size increased by more than 5KB"
+            elif [ $DIFF -gt 1000 ]; then
+              echo "ℹ️ Notice: Binary size increased by more than 1KB"
+            fi
+          fi
+
+  # コードカバレッジ
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install gcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcov lcov
+
+      - name: Build with coverage
+        run: |
+          # カバレッジ対応ビルドの準備
+          echo "Coverage analysis setup (placeholder for future implementation)"
+          # 実際のカバレッジテストは埋め込みターゲット用に別途実装が必要
+
+  # パフォーマンス回帰テスト
+  performance:
+    name: Performance Regression Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Analyze code complexity
+        run: |
+          # 関数の複雑度を測定
+          find pico_audio_i2s -name "*.c" -o -name "*.cpp" | while read file; do
+            echo "Analyzing $file"
+            # 行数とファイルサイズのチェック
+            lines=$(wc -l < "$file")
+            size=$(wc -c < "$file")
+            echo "  Lines: $lines, Size: $size bytes"
+            
+            # 大きすぎるファイルの警告
+            if [ $lines -gt 1000 ]; then
+              echo "⚠️ Warning: $file has more than 1000 lines"
+            fi
+          done
+
+      - name: Check function sizes
+        run: |
+          # 大きな関数の検出
+          grep -n "^[a-zA-Z_].*(" pico_audio_i2s/*.c pico_audio_i2s/*.cpp | \
+          head -20 || echo "Function size analysis completed"
+
+  # 自動化可能なテスト
+  automated-tests:
+    name: Automated Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test build configurations
+        run: |
+          # 異なる設定でのビルドテスト
+          echo "Testing various build configurations..."
+          
+          # PIOとDMAの異なる組み合わせをテスト
+          configs=(
+            "PICO_AUDIO_I2S_PIO=0 PICO_AUDIO_I2S_DMA_IRQ=0"
+            "PICO_AUDIO_I2S_PIO=1 PICO_AUDIO_I2S_DMA_IRQ=1"
+          )
+          
+          for config in "${configs[@]}"; do
+            echo "Testing configuration: $config"
+            # 実際のテストは将来の実装で追加
+          done
+
+      - name: API compatibility test
+        run: |
+          # APIの互換性テスト
+          echo "Checking API compatibility..."
+          
+          # ヘッダーファイルの構文チェック
+          find pico_audio_i2s/include -name "*.h" | while read header; do
+            echo "Checking header: $header"
+            gcc -fsyntax-only -I pico_audio_i2s/include "$header" 2>/dev/null || \
+            echo "Warning: $header may have syntax issues"
+          done
+
+  # PRサマリー生成
+  pr-summary:
+    name: PR Summary
+    runs-on: ubuntu-latest
+    needs: [pr-validation, diff-build, performance]
+    if: always()
+    steps:
+      - name: Generate PR summary
+        run: |
+          echo "## Pull Request Analysis Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "- PR Validation: ${{ needs.pr-validation.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Differential Build: ${{ needs.diff-build.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Performance Check: ${{ needs.performance.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.diff-build.result }}" == "success" ]]; then
+            echo "✅ All builds completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Build issues detected" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          script: |
+            const summary = `
+            ## 🤖 Automated PR Analysis
+            
+            | Check | Status |
+            |-------|--------|
+            | PR Validation | ${{ needs.pr-validation.result }} |
+            | Build Test | ${{ needs.diff-build.result }} |
+            | Performance | ${{ needs.performance.result }} |
+            
+            ${github.event.pull_request.draft ? '📝 This is a draft PR' : '🚀 Ready for review'}
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });

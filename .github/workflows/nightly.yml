@@ -1,0 +1,295 @@
+#------------------------------------------------------
+# Copyright (c) 2025, Elehobica
+# Released under the BSD-2-Clause
+# refer to https://opensource.org/licenses/BSD-2-Clause
+#------------------------------------------------------
+
+name: Nightly Build & Test
+
+on:
+  schedule:
+    # 毎日午前3時（UTC）に実行
+    - cron: '0 3 * * *'
+  workflow_dispatch:  # 手動実行も可能
+
+jobs:
+  # 全サンプルプロジェクトのビルド
+  comprehensive-build:
+    name: Comprehensive Build Test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [rp2040, rp2350]
+        build_type: [Release, Debug, MinSizeRel]
+        include:
+          - platform: rp2040
+            board: pico
+          - platform: rp2350
+            board: pico2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Find all sample projects
+        id: find_samples
+        run: |
+          # samplesディレクトリ内のプロジェクトを検索
+          projects=$(find samples -name "CMakeLists.txt" -exec dirname {} \; | sort)
+          echo "Found projects:"
+          echo "$projects"
+          echo "projects<<EOF" >> $GITHUB_OUTPUT
+          echo "$projects" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Build all samples
+        run: |
+          while IFS= read -r project; do
+            if [ -n "$project" ] && [ -d "$project" ]; then
+              echo "Building $project for ${{ matrix.platform }} (${{ matrix.build_type }})"
+              
+              # プロジェクトディレクトリに移動
+              cd "$project"
+              
+              # ビルドディレクトリを作成
+              BUILD_DIR="build_${{ matrix.platform }}_${{ matrix.build_type }}"
+              mkdir -p "$BUILD_DIR"
+              cd "$BUILD_DIR"
+              
+              # CMake設定
+              cmake \
+                -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+                -DPICO_PLATFORM=${{ matrix.platform }} \
+                -DPICO_BOARD=${{ matrix.board }} \
+                ..
+              
+              # ビルド実行
+              make -j$(nproc)
+              
+              # 成果物の確認
+              ls -la *.uf2 *.elf 2>/dev/null || echo "No binary files generated"
+              
+              # プロジェクトルートに戻る
+              cd - > /dev/null
+              cd - > /dev/null
+            fi
+          done <<< "${{ steps.find_samples.outputs.projects }}"
+
+      - name: Collect build artifacts
+        run: |
+          echo "=== Build Summary ===" 
+          find samples -name "*.uf2" -o -name "*.elf" | sort
+
+  # メモリ使用量トレンド分析
+  memory-trend:
+    name: Memory Usage Trend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 50  # 過去50コミットを取得
+
+      - name: Build current version
+        uses: elehobica/build-pico@v1
+        with:
+          path: samples/sine_wave_i2s_32b
+          build: build_current
+          platform: rp2040
+          board: pico
+
+      - name: Analyze memory usage
+        run: |
+          # 現在のメモリ使用量を記録
+          if [ -f "samples/sine_wave_i2s_32b/build_current/sine_wave_i2s_32b.elf" ]; then
+            echo "=== Current Memory Usage ===" 
+            arm-none-eabi-size samples/sine_wave_i2s_32b/build_current/sine_wave_i2s_32b.elf
+            
+            # メモリ使用量をファイルに保存
+            arm-none-eabi-size samples/sine_wave_i2s_32b/build_current/sine_wave_i2s_32b.elf | tail -1 > memory_usage.txt
+            cat memory_usage.txt
+          fi
+
+      - name: Upload memory trend data
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-trend-$(date +%Y%m%d)
+          path: memory_usage.txt
+          retention-days: 90
+
+  # パフォーマンスベンチマーク
+  performance-benchmark:
+    name: Performance Benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Compile-time benchmark
+        run: |
+          echo "=== Compile Time Benchmark ==="
+          
+          # コンパイル時間の測定
+          cd samples/sine_wave_i2s_32b
+          mkdir -p build_benchmark && cd build_benchmark
+          
+          echo "Starting RP2040 build..."
+          time_rp2040=$(TIMEFORMAT='%R'; { time cmake -DPICO_PLATFORM=rp2040 -DPICO_BOARD=pico .. && make -j$(nproc); } 2>&1)
+          echo "RP2040 build time: $time_rp2040"
+          
+          # クリーンアップ
+          cd .. && rm -rf build_benchmark && mkdir build_benchmark && cd build_benchmark
+          
+          echo "Starting RP2350 build..."
+          time_rp2350=$(TIMEFORMAT='%R'; { time cmake -DPICO_PLATFORM=rp2350 -DPICO_BOARD=pico2 .. && make -j$(nproc); } 2>&1)
+          echo "RP2350 build time: $time_rp2350"
+
+      - name: Code metrics
+        run: |
+          echo "=== Code Metrics ==="
+          
+          # 行数統計
+          echo "Source lines of code:"
+          find pico_audio_i2s -name "*.c" -o -name "*.cpp" -o -name "*.h" | xargs wc -l | tail -1
+          
+          # ファイル数統計
+          echo "Number of source files:"
+          find pico_audio_i2s -name "*.c" -o -name "*.cpp" -o -name "*.h" | wc -l
+          
+          # 最大ファイルサイズ
+          echo "Largest source files:"
+          find pico_audio_i2s -name "*.c" -o -name "*.cpp" -o -name "*.h" -exec wc -l {} + | sort -nr | head -5
+
+  # 依存関係チェック
+  dependency-check:
+    name: Dependency Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Check submodule status
+        run: |
+          echo "=== Submodule Status ==="
+          git submodule status
+          
+          # 各サブモジュールの最新状態をチェック
+          git submodule foreach 'echo "Checking $name:"; git log --oneline -5'
+
+      - name: Validate pico-extras
+        run: |
+          echo "=== Pico-extras Validation ==="
+          if [ -d "libs/pico-extras" ]; then
+            cd libs/pico-extras
+            # pico-extrasの基本的な構造をチェック
+            [ -d "src" ] || (echo "pico-extras src directory missing" && exit 1)
+            [ -f "pico_extras_import.cmake" ] || (echo "pico_extras_import.cmake missing" && exit 1)
+            echo "✅ pico-extras structure is valid"
+          else
+            echo "❌ pico-extras directory not found"
+            exit 1
+          fi
+
+      - name: Check SDK compatibility
+        run: |
+          echo "=== SDK Compatibility Check ==="
+          # SDK要件のチェック
+          echo "Checking for required SDK features..."
+          
+          # CMakeファイルでのSDKバージョン要件をチェック
+          grep -r "cmake_minimum_required" . | grep -v build | head -5
+
+  # セキュリティ監査
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 全履歴を取得
+
+      - name: Check for sensitive data
+        run: |
+          echo "=== Security Audit ==="
+          
+          # 機密情報のパターンをチェック
+          patterns=(
+            "password"
+            "secret"
+            "private.*key"
+            "api.*key"
+            "token"
+            "credential"
+          )
+          
+          for pattern in "${patterns[@]}"; do
+            echo "Checking for pattern: $pattern"
+            if git log --all --grep="$pattern" --oneline | grep -v "ssh.*key\|public.*key"; then
+              echo "⚠️ Potential sensitive data found in commit messages"
+            fi
+          done
+
+      - name: Check file permissions
+        run: |
+          echo "=== File Permission Check ==="
+          
+          # 実行可能ファイルのチェック
+          find . -type f -executable -not -path "./.git/*" -not -path "./build/*" | while read file; do
+            echo "Executable file found: $file"
+          done
+
+      - name: License compliance
+        run: |
+          echo "=== License Compliance ==="
+          
+          # ライセンスファイルの存在確認
+          [ -f "LICENSE" ] || echo "⚠️ LICENSE file not found"
+          
+          # ソースファイルのライセンスヘッダーチェック
+          missing_license=0
+          find pico_audio_i2s -name "*.c" -o -name "*.cpp" -o -name "*.h" | while read file; do
+            if ! head -10 "$file" | grep -q -i "license\|copyright"; then
+              echo "⚠️ $file missing license header"
+              missing_license=$((missing_license + 1))
+            fi
+          done
+
+  # レポート生成
+  nightly-report:
+    name: Nightly Report
+    runs-on: ubuntu-latest
+    needs: [comprehensive-build, memory-trend, performance-benchmark, dependency-check, security-audit]
+    if: always()
+    steps:
+      - name: Generate nightly report
+        run: |
+          echo "# 🌙 Nightly Build Report - $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Comprehensive Build | ${{ needs.comprehensive-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Memory Trend | ${{ needs.memory-trend.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Performance | ${{ needs.performance-benchmark.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependencies | ${{ needs.dependency-check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security | ${{ needs.security-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # 総合評価
+          if [[ "${{ needs.comprehensive-build.result }}" == "success" && 
+                "${{ needs.dependency-check.result }}" == "success" ]]; then
+            echo "✅ **Nightly build passed successfully**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Nightly build encountered issues**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📊 Detailed results available in individual job logs." >> $GITHUB_STEP_SUMMARY

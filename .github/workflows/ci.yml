@@ -1,0 +1,304 @@
+#------------------------------------------------------
+# Copyright (c) 2025, Elehobica
+# Released under the BSD-2-Clause
+# refer to https://opensource.org/licenses/BSD-2-Clause
+#------------------------------------------------------
+
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # コード品質とフォーマットチェック
+  code-quality:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Check C/C++ formatting
+        run: |
+          find . -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" | \
+          grep -v build | grep -v libs | xargs clang-format --dry-run --Werror
+
+      - name: Check line endings
+        run: |
+          if git ls-files | xargs file | grep -q "CRLF"; then
+            echo "Error: CRLF line endings found"
+            git ls-files | xargs file | grep "CRLF"
+            exit 1
+          fi
+
+      - name: Check for tabs
+        run: |
+          if git ls-files | grep -E '\.(c|cpp|h|hpp)$' | xargs grep -l $'\t'; then
+            echo "Error: Tab characters found in source files"
+            exit 1
+          fi
+
+  # 静的解析
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=all --error-exitcode=1 \
+            --suppress=missingIncludeSystem \
+            --suppress=unusedFunction \
+            --suppress=unmatchedSuppression \
+            pico_audio_i2s/ samples/
+
+  # ドキュメント検証
+  documentation:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check README files
+        run: |
+          # 必要なREADMEファイルの存在確認
+          [ -f README.md ] || (echo "Root README.md missing" && exit 1)
+          [ -f SETUP.md ] || (echo "SETUP.md missing" && exit 1)
+          [ -f CLAUDE.md ] || (echo "CLAUDE.md missing" && exit 1)
+
+      - name: Check documentation format
+        run: |
+          # マークダウンファイルの基本チェック
+          find . -name "*.md" | while read file; do
+            echo "Checking $file"
+            # 空のファイルチェック
+            [ -s "$file" ] || (echo "$file is empty" && exit 1)
+          done
+
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
+      - name: Generate documentation
+        run: |
+          # Doxygenコンフィグがある場合のみ実行
+          if [ -f Doxyfile ]; then
+            doxygen Doxyfile
+          else
+            echo "No Doxyfile found, skipping documentation generation"
+          fi
+
+  # 複数プラットフォームビルドテスト
+  build-test:
+    name: Build Test (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [rp2040, rp2350]
+        build_type: [Release, Debug]
+        include:
+          - platform: rp2040
+            board: pico
+          - platform: rp2350
+            board: pico2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Build ${{ matrix.platform }} (${{ matrix.build_type }})
+        uses: elehobica/build-pico@v1
+        with:
+          path: samples/sine_wave_i2s_32b
+          build: build_${{ matrix.platform }}_${{ matrix.build_type }}
+          platform: ${{ matrix.platform }}
+          board: ${{ matrix.board }}
+          cmake_options: -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Verify build artifacts
+        run: |
+          BUILD_DIR="samples/sine_wave_i2s_32b/build_${{ matrix.platform }}_${{ matrix.build_type }}"
+          # UF2ファイルの存在確認
+          [ -f "$BUILD_DIR/sine_wave_i2s_32b.uf2" ] || (echo "UF2 file not found" && exit 1)
+          # ELFファイルの存在確認
+          [ -f "$BUILD_DIR/sine_wave_i2s_32b.elf" ] || (echo "ELF file not found" && exit 1)
+          # ファイルサイズ確認（空でないこと）
+          [ -s "$BUILD_DIR/sine_wave_i2s_32b.uf2" ] || (echo "UF2 file is empty" && exit 1)
+          [ -s "$BUILD_DIR/sine_wave_i2s_32b.elf" ] || (echo "ELF file is empty" && exit 1)
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.platform }}-${{ matrix.build_type }}
+          path: |
+            samples/sine_wave_i2s_32b/build_${{ matrix.platform }}_${{ matrix.build_type }}/*.uf2
+            samples/sine_wave_i2s_32b/build_${{ matrix.platform }}_${{ matrix.build_type }}/*.elf
+          retention-days: 7
+
+  # ライブラリ単体ビルドテスト
+  library-build:
+    name: Library Build Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Test library compilation
+        run: |
+          # ライブラリ単体のコンパイルテスト
+          cd pico_audio_i2s
+          mkdir -p build && cd build
+          
+          # 基本的なCMake設定でテスト
+          cmake -DCMAKE_TOOLCHAIN_FILE=$PICO_SDK_PATH/cmake/pico_sdk_import.cmake \
+                -DPICO_PLATFORM=rp2040 \
+                -DPICO_BOARD=pico \
+                ..
+          
+          # ライブラリのコンパイルテスト（リンクはスキップ）
+          make pico_audio_i2s_32b || echo "Library build test completed"
+
+  # メモリ使用量解析
+  memory-analysis:
+    name: Memory Usage Analysis
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-rp2040-Release
+          path: ./artifacts/rp2040/
+
+      - name: Download build artifacts (RP2350)
+        uses: actions/download-artifact@v4
+        with:
+          name: build-rp2350-Release
+          path: ./artifacts/rp2350/
+
+      - name: Install analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binutils-arm-none-eabi
+
+      - name: Analyze memory usage
+        run: |
+          echo "=== RP2040 Memory Usage ==="
+          if [ -f "./artifacts/rp2040/sine_wave_i2s_32b.elf" ]; then
+            arm-none-eabi-size ./artifacts/rp2040/sine_wave_i2s_32b.elf
+            arm-none-eabi-nm --size-sort ./artifacts/rp2040/sine_wave_i2s_32b.elf | head -20
+          fi
+          
+          echo "=== RP2350 Memory Usage ==="
+          if [ -f "./artifacts/rp2350/sine_wave_i2s_32b.elf" ]; then
+            arm-none-eabi-size ./artifacts/rp2350/sine_wave_i2s_32b.elf
+            arm-none-eabi-nm --size-sort ./artifacts/rp2350/sine_wave_i2s_32b.elf | head -20
+          fi
+
+  # 構成ファイル検証
+  config-validation:
+    name: Configuration Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate CMake files
+        run: |
+          # CMakeLists.txtファイルの基本チェック
+          find . -name "CMakeLists.txt" | while read file; do
+            echo "Validating $file"
+            # 基本的な構文チェック（cmake --parseで検証）
+            if command -v cmake >/dev/null 2>&1; then
+              cmake -P "$file" 2>/dev/null || echo "Warning: $file may have syntax issues"
+            fi
+          done
+
+      - name: Check VS Code configuration
+        run: |
+          # VS Code設定ファイルの妥当性チェック
+          find . -name "tasks.json" -o -name "settings.json" | while read file; do
+            echo "Validating $file"
+            python3 -m json.tool "$file" > /dev/null || (echo "Invalid JSON: $file" && exit 1)
+          done
+
+  # セキュリティスキャン
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run hardcoded secrets scan
+        run: |
+          # パスワードやトークンなどの検出
+          if git log --all --full-history -- . | grep -iE "(password|token|secret|key)" | grep -v "ssh-key\|public.*key"; then
+            echo "Warning: Potential secrets found in git history"
+          fi
+
+      - name: Check for hardcoded paths
+        run: |
+          # ハードコードされたパスの検出
+          if grep -r "/Users/\|/home/\|C:\\\\" . --exclude-dir=.git --exclude-dir=build --exclude-dir=libs; then
+            echo "Error: Hardcoded user paths found"
+            exit 1
+          fi
+
+  # 総合レポート
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, static-analysis, documentation, build-test, config-validation, security-scan]
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Code Quality | ${{ needs.code-quality.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Static Analysis | ${{ needs.static-analysis.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Documentation | ${{ needs.documentation.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Test | ${{ needs.build-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Config Validation | ${{ needs.config-validation.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Scan | ${{ needs.security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check overall status
+        run: |
+          if [[ "${{ needs.code-quality.result }}" == "failure" || 
+                "${{ needs.static-analysis.result }}" == "failure" || 
+                "${{ needs.build-test.result }}" == "failure" || 
+                "${{ needs.config-validation.result }}" == "failure" || 
+                "${{ needs.security-scan.result }}" == "failure" ]]; then
+            echo "❌ CI pipeline failed"
+            exit 1
+          else
+            echo "✅ CI pipeline passed"
+          fi

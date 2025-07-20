@@ -2,9 +2,13 @@
 
 **高性能 32bit I2S DAC ライブラリ for Raspberry Pi Pico / Pico 2**
 
-[![Build Status](https://github.com/elehobica/pico_audio_i2s_32b/actions/workflows/build-binaries.yml/badge.svg)](https://github.com/elehobica/pico_audio_i2s_32b/actions/workflows/build-binaries.yml)
+[![Build Binaries](https://github.com/tsugumasa320/pico_audio_i2s_32b/actions/workflows/build-binaries.yml/badge.svg)](https://github.com/tsugumasa320/pico_audio_i2s_32b/actions/workflows/build-binaries.yml)
+[![CI](https://github.com/tsugumasa320/pico_audio_i2s_32b/actions/workflows/ci.yml/badge.svg)](https://github.com/tsugumasa320/pico_audio_i2s_32b/actions/workflows/ci.yml)
+[![Nightly](https://github.com/tsugumasa320/pico_audio_i2s_32b/actions/workflows/nightly.yml/badge.svg)](https://github.com/tsugumasa320/pico_audio_i2s_32b/actions/workflows/nightly.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi%20Pico-green.svg)](https://www.raspberrypi.org/products/raspberry-pi-pico/)
+[![RP2040](https://img.shields.io/badge/RP2040-supported-blue.svg)](https://www.raspberrypi.org/products/raspberry-pi-pico/)
+[![RP2350](https://img.shields.io/badge/RP2350-supported-blue.svg)](https://www.raspberrypi.org/products/raspberry-pi-pico-2/)
 
 ## 🌟 概要
 
