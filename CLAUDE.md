@@ -230,6 +230,82 @@ git push origin main
 - `Build Sample (sine_wave_i2s_32b)`: サンプルビルド  
 - `Clean Build`: 全ビルドディレクトリクリア
 
+### I2Sオーディオ出力の重要ノウハウ
+
+#### ❌ よくある失敗パターンと ✅ 正しい実装
+
+**1. バッファサイズ設定**
+- ❌ 不適切: 任意のサイズ（256など）
+- ✅ 正解: 動作実績のあるサイズ（`SAMPLES_PER_BUFFER = 1156`）
+- 理由: I2SとDMAの同期に適したサイズが重要
+
+**2. DACゼロレベル設定**
+- ❌ 不適切: `DAC_ZERO = 0`  
+- ✅ 正解: `DAC_ZERO = 1`
+- 理由: I2S DACの特性に合わせた適切なオフセット値
+
+**3. システムクロック設定順序**
+```cpp
+// ❌ 不適切
+stdio_init_all();
+pll_init(pll_usb, ...);
+clock_configure(clk_sys, ...);
+// clk_peri設定なし、stdio再初期化なし
+
+// ✅ 正解  
+stdio_init_all();
+sleep_ms(2000);  // USBシリアル安定化
+pll_init(pll_usb, ...);
+clock_configure(clk_usb, ...);
+clock_configure(clk_sys, ...);
+clock_configure(clk_peri, ...);  // 周辺機器クロック必須
+stdio_init_all();  // クロック変更後の再初期化必須
+```
+
+**4. DCDC設定（必須）**
+```cpp
+// オーディオノイズ低減のため必須
+const uint32_t PIN_DCDC_PSM_CTRL = 23;
+gpio_init(PIN_DCDC_PSM_CTRL);
+gpio_set_dir(PIN_DCDC_PSM_CTRL, GPIO_OUT);
+gpio_put(PIN_DCDC_PSM_CTRL, 1); // PWMモード
+```
+
+**5. 初期化シーケンスの厳守**
+```cpp
+// ✅ 正解の順序（sine_wave_i2s_32bで実証済み）
+// 1. stdio_init_all()
+// 2. sleep_ms(2000)
+// 3. システムクロック設定
+// 4. 周辺機器クロック設定  
+// 5. stdio_init_all() 再実行
+// 6. DCDC PWMモード設定
+// 7. オーディオバッファプール作成
+// 8. I2Sセットアップ
+// 9. バッファプール接続
+// 10. 初期バッファ設定（DAC_ZERO値）
+// 11. I2S有効化
+```
+
+#### 新規オーディオプロジェクト作成時の必須チェックリスト
+
+1. **動作実績コードからコピー**: sine_wave_i2s_32bから初期化部分をコピー
+2. **バッファサイズ**: `SAMPLES_PER_BUFFER = 1156` を使用
+3. **DAC設定**: `DAC_ZERO = 1` を使用
+4. **クロック設定**: clk_peri設定とstdio再初期化を含める
+5. **DCDC設定**: PIN_DCDC_PSM_CTRL = 23でPWMモード
+6. **初期化順序**: 上記シーケンスを厳守
+7. **デバッグ**: 各ステップでprintf出力を追加
+
+#### トラブルシューティング手順
+
+**音が出ない場合:**
+1. 動作するsine_wave_i2s_32bサンプルでテスト
+2. 新規プロジェクトの初期化を上記チェックリストと比較
+3. バッファサイズとDAC_ZERO値を確認
+4. システムクロックとclk_peri設定を確認
+5. 初期化シーケンスの順序を確認
+
 ### 今後の開発指針
 
 #### 機能拡張の検討事項
