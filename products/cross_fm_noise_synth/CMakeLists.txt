@@ -1,10 +1,26 @@
 cmake_minimum_required(VERSION 3.13)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Pico SDK initialization
+include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
+# pico-extras is required for pico_util_buffer dependency
+if(DEFINED ENV{PICO_EXTRAS_PATH})
+    include($ENV{PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
+else()
+    # Try local path
+    set(LOCAL_PICO_EXTRAS_PATH ${CMAKE_CURRENT_LIST_DIR}/../../libs/pico-extras)
+    if(EXISTS ${LOCAL_PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
+        set(PICO_EXTRAS_PATH ${LOCAL_PICO_EXTRAS_PATH})
+        include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
+    else()
+        message(FATAL_ERROR "pico-extras is required but not found. Please set PICO_EXTRAS_PATH environment variable or ensure libs/pico-extras exists.")
+    endif()
+endif()
+
 # Cross FM Noise Synthesizer
 project(cross_fm_noise_synth)
 
-# Pico SDK initialization
-include(../../pico_sdk_import.cmake)
 pico_sdk_init()
 
 # Add DaisySP library
@@ -59,6 +75,7 @@ target_link_libraries(cross_fm_noise_synth
     pico_stdlib
     pico_audio_i2s_32b          # I2S audio output
     pico_audio_32b              # 32bit audio processing
+    pico_util_buffer            # Required by pico_audio_32b
     DaisySP                     # DSP library
     hardware_spi                # For display/controls
     hardware_adc                # For analog controls

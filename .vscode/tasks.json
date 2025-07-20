@@ -1,5 +1,6 @@
 {
     "version": "2.0.0",
+    // VS Code Tasks Configuration for Pico Audio I2S 32b
     "tasks": [
         {
             "label": "Configure CMake",
@@ -55,12 +56,14 @@
             "args": [
                 "-B", "samples/sine_wave_i2s_32b/build", 
                 "-S", "samples/sine_wave_i2s_32b",
-                "-DCMAKE_C_COMPILER=/usr/local/bin/arm-none-eabi-gcc",
-                "-DCMAKE_CXX_COMPILER=/usr/local/bin/arm-none-eabi-g++",
-                "-DCMAKE_ASM_COMPILER=/usr/local/bin/arm-none-eabi-gcc",
                 "-DPICO_PLATFORM=rp2350",
                 "-DPICO_BOARD=pico2"
             ],
+            "options": {
+                "env": {
+                    "PICO_SDK_PATH": "${env:HOME}/.pico-sdk/sdk/2.1.1"
+                }
+            },
             "group": "build",
             "presentation": {
                 "reveal": "always",
@@ -99,12 +102,14 @@
             "args": [
                 "-B", "products/cross_fm_noise_synth/build", 
                 "-S", "products/cross_fm_noise_synth",
-                "-DCMAKE_C_COMPILER=/usr/local/bin/arm-none-eabi-gcc",
-                "-DCMAKE_CXX_COMPILER=/usr/local/bin/arm-none-eabi-g++",
-                "-DCMAKE_ASM_COMPILER=/usr/local/bin/arm-none-eabi-gcc",
                 "-DPICO_PLATFORM=rp2350",
                 "-DPICO_BOARD=pico2"
             ],
+            "options": {
+                "env": {
+                    "PICO_SDK_PATH": "${env:HOME}/.pico-sdk/sdk/2.1.1"
+                }
+            },
             "group": "build",
             "presentation": {
                 "reveal": "always",
