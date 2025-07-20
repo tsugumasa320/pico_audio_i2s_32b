@@ -150,46 +150,52 @@ bool init_synth() {
     // gpio_init(PIN_LED_STATUS);
     // gpio_set_dir(PIN_LED_STATUS, GPIO_OUT);
     
-    // オーディオシステム初期化
-    audio_format_t audio_format = {
-        .sample_freq = 44100,
-        .pcm_format = AUDIO_PCM_FORMAT_S32,
-        .channel_count = AUDIO_CHANNEL_STEREO
+    // オーディオシステム初期化 (sine_wave_i2s_32bと同じ設定)
+    
+    // sine_wave_i2s_32bと同じバッファサイズを使用
+    #define SAMPLES_PER_BUFFER 1156
+    static constexpr int32_t DAC_ZERO = 1;  // DACのゼロレベル
+    
+    static audio_format_t audio_format = {
+        .sample_freq = 44100,                // サンプリング周波数: 44.1kHz (CD品質)
+        .pcm_format = AUDIO_PCM_FORMAT_S32,  // PCMフォーマット: 32bit signed
+        .channel_count = AUDIO_CHANNEL_STEREO // チャンネル数: ステレオ (2ch)
     };
     
-    audio_buffer_format_t buffer_format = {
+    static audio_buffer_format_t producer_format = {
         .format = &audio_format,
-        .sample_stride = 8  // 32bit stereo (4bytes * 2 channels)
+        .sample_stride = 8                   // ステレオ32bitなので8バイト/サンプル
     };
     
-    audio_i2s_config_t config = {
-        .data_pin = PICO_AUDIO_I2S_DATA_PIN,
-        .clock_pin_base = PICO_AUDIO_I2S_CLOCK_PIN_BASE,
-        .dma_channel0 = 0,
-        .dma_channel1 = 1,
-        .pio_sm = 0
+    static audio_i2s_config_t i2s_config = {
+        .data_pin = PICO_AUDIO_I2S_DATA_PIN,         // データピン (デフォルト: GP18)
+        .clock_pin_base = PICO_AUDIO_I2S_CLOCK_PIN_BASE, // クロックピンベース (デフォルト: GP16)
+        .dma_channel0 = 0,                           // DMAチャンネル0
+        .dma_channel1 = 1,                           // DMAチャンネル1
+        .pio_sm = 0                                  // PIOステートマシン番号
     };
     
     printf("I2S Config: data_pin=%d, clock_pin_base=%d\n", 
-           config.data_pin, config.clock_pin_base);
+           i2s_config.data_pin, i2s_config.clock_pin_base);
     printf("Audio format: freq=%d, pcm_format=%d, channels=%d\n",
            audio_format.sample_freq, audio_format.pcm_format, audio_format.channel_count);
     
-    const audio_format_t *output_format = audio_i2s_setup(&audio_format, &audio_format, &config);
-    if (!output_format) {
-        printf("Failed to setup I2S audio\n");
-        return false;
-    }
-    
-    printf("I2S setup successful, output format: freq=%d\n", output_format->sample_freq);
-    
-    // バッファプール作成
-    g_audio_pool = audio_new_producer_pool(&buffer_format, 3, 256);
+    // オーディオバッファプールを作成 (sine_wave_i2s_32bと同じ)
+    g_audio_pool = audio_new_producer_pool(&producer_format, 3, SAMPLES_PER_BUFFER);
     if (!g_audio_pool) {
         printf("Failed to create audio buffer pool\n");
         return false;
     }
     printf("Audio buffer pool created successfully\n");
+    
+    // I2Sハードウェアをセットアップ (sine_wave_i2s_32bと同じ)
+    const audio_format_t *output_format = audio_i2s_setup(&audio_format, &audio_format, &i2s_config);
+    if (!output_format) {
+        printf("PicoAudio: Unable to open audio device.\n");
+        return false;
+    }
+    
+    printf("I2S setup successful, output format: freq=%d\n", output_format->sample_freq);
     
     // シンセエンジン初期化 (実装必要な場合はコメントを外す)
     // fm_engine_init(&g_synth_state.fm_engine);
@@ -198,19 +204,7 @@ bool init_synth() {
     // ui_controller_init(&g_synth_state.ui);
     // preset_manager_init(&g_synth_state.preset_mgr);
     
-    // 初期バッファを準備（無音状態）
-    {
-        audio_buffer_t *ab = take_audio_buffer(g_audio_pool, true);
-        int32_t *samples = (int32_t *) ab->buffer->bytes;
-        for (uint i = 0; i < ab->max_sample_count; i++) {
-            samples[i*2+0] = 0;  // Left
-            samples[i*2+1] = 0;  // Right
-        }
-        ab->sample_count = ab->max_sample_count;
-        give_audio_buffer(g_audio_pool, ab);
-    }
-    
-    // オーディオ開始
+    // バッファプールをI2S出力に接続 (sine_wave_i2s_32bと同じ)
     printf("Connecting audio pool to I2S...\n");
     bool connect_result = audio_i2s_connect(g_audio_pool);
     if (!connect_result) {
@@ -219,6 +213,19 @@ bool init_synth() {
     }
     printf("Audio pool connected successfully\n");
     
+    // 初期バッファデータを設定（無音状態）- sine_wave_i2s_32bと同じ
+    {
+        audio_buffer_t *ab = take_audio_buffer(g_audio_pool, true);
+        int32_t *samples = (int32_t *) ab->buffer->bytes;
+        for (uint i = 0; i < ab->max_sample_count; i++) {
+            samples[i*2+0] = DAC_ZERO;  // 左チャンネル
+            samples[i*2+1] = DAC_ZERO;  // 右チャンネル
+        }
+        ab->sample_count = ab->max_sample_count;
+        give_audio_buffer(g_audio_pool, ab);
+    }
+    
+    // I2S出力を有効化 (sine_wave_i2s_32bと同じ)
     printf("Enabling I2S output...\n");
     audio_i2s_set_enabled(true);
     printf("I2S output enabled\n");
