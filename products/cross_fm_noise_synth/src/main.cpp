@@ -13,6 +13,7 @@
 #include "pico/stdlib.h"
 #include "pico/audio_i2s.h"
 #include "pico/audio.h"
+#include "pico/multicore.h"
 #include "hardware/adc.h"
 #include "hardware/spi.h"
 #include "hardware/pwm.h"
@@ -31,32 +32,47 @@
 static audio_buffer_pool_t *g_audio_pool;
 // static AnalogMultiplexer g_multiplexer;
 
+// グローバル変数
+static bool audio_enabled = false;
+static uint32_t audio_phase = 0;
+
 /**
- * @brief オーディオコールバック - リアルタイム音声生成
+ * @brief Core1で実行される音声生成ループ
  */
-void audio_callback() {
-    audio_buffer_t *buffer = take_audio_buffer(g_audio_pool, false);
-    if (!buffer) return;
-
-    int32_t *samples = (int32_t *)buffer->buffer->bytes;
-    const uint32_t sample_count = buffer->max_sample_count;
-
-    // 簡単なテストトーン生成 (440Hz サイン波)
-    static uint32_t phase = 0;
-    const uint32_t phase_increment = (440 * 0x10000) / 44100; // 440Hz @ 44.1kHz
+void core1_audio_loop() {
+    printf("Core1 audio processing started\n");
     
-    for (uint32_t i = 0; i < sample_count; i++) {
-        // 簡単なサイン波近似
-        int32_t sample = (phase & 0x8000) ? 0x1000000 : -0x1000000;
-        phase += phase_increment;
-        
-        // ステレオ出力
-        samples[i * 2 + 0] = sample;  // Left
-        samples[i * 2 + 1] = sample;  // Right
-    }
+    while (true) {
+        audio_buffer_t *buffer = take_audio_buffer(g_audio_pool, true);
+        if (!buffer) continue;
 
-    buffer->sample_count = sample_count;
-    give_audio_buffer(g_audio_pool, buffer);
+        int32_t *samples = (int32_t *)buffer->buffer->bytes;
+        const uint32_t sample_count = buffer->max_sample_count;
+
+        if (audio_enabled) {
+            // 440Hz テストトーン生成
+            const uint32_t phase_increment = (440UL * 0x10000UL) / 44100UL; // 440Hz @ 44.1kHz
+            
+            for (uint32_t i = 0; i < sample_count; i++) {
+                // 矩形波生成 (より強めの信号レベル)
+                int32_t sample = (audio_phase & 0x8000) ? 0x1000000 : -0x1000000;
+                audio_phase += phase_increment;
+                
+                // ステレオ出力
+                samples[i * 2 + 0] = sample;  // Left
+                samples[i * 2 + 1] = sample;  // Right
+            }
+        } else {
+            // 無音
+            for (uint32_t i = 0; i < sample_count; i++) {
+                samples[i * 2 + 0] = 0;  // Left
+                samples[i * 2 + 1] = 0;  // Right
+            }
+        }
+
+        buffer->sample_count = sample_count;
+        give_audio_buffer(g_audio_pool, buffer);
+    }
 }
 
 /**
@@ -107,9 +123,28 @@ bool init_synth() {
     // ui_controller_init(&g_synth_state.ui);
     // preset_manager_init(&g_synth_state.preset_mgr);
     
+    // 初期バッファを準備（無音状態）
+    {
+        audio_buffer_t *ab = take_audio_buffer(g_audio_pool, true);
+        int32_t *samples = (int32_t *) ab->buffer->bytes;
+        for (uint i = 0; i < ab->max_sample_count; i++) {
+            samples[i*2+0] = 0;  // Left
+            samples[i*2+1] = 0;  // Right
+        }
+        ab->sample_count = ab->max_sample_count;
+        give_audio_buffer(g_audio_pool, ab);
+    }
+    
     // オーディオ開始
     audio_i2s_connect(g_audio_pool);
     audio_i2s_set_enabled(true);
+    
+    // Core1で音声処理を開始
+    multicore_launch_core1(core1_audio_loop);
+    
+    // 少し待ってから音声出力を有効化
+    sleep_ms(100);
+    audio_enabled = true;
     
     printf("Cross FM Noise Synthesizer initialized\n");
     return true;
@@ -126,26 +161,25 @@ int main() {
     
     printf("Cross FM Noise Synthesizer starting...\n");
     
-    // メインループ
+    // メインループ (Core0はUI制御用)
     while (true) {
-        // TODO: アナログマルチプレクサ更新とパラメーター制御の実装
-        // multiplexer_update(&g_multiplexer);
-        
         // 現在時刻取得
         uint32_t current_time = to_ms_since_boot(get_absolute_time());
         
-        // オーディオコールバックは別スレッドで実行
-        audio_callback();
+        // デバッグ情報を定期的に出力
+        static uint32_t last_debug_time = 0;
+        if (current_time - last_debug_time > 5000) {  // 5秒ごと
+            printf("Cross FM Synth running... Audio Core1 active\n");
+            last_debug_time = current_time;
+        }
         
-        // TODO: LEDステータス更新の実装
-        // static uint32_t led_toggle_time = 0;
-        // if (current_time - led_toggle_time > 500) {
-        //     gpio_xor_mask(1u << PIN_LED_STATUS);
-        //     led_toggle_time = current_time;
-        // }
+        // TODO: UIコントロール処理
+        // - ボタン入力
+        // - アナログコントロール読み取り
+        // - プリセット管理
         
-        // 少し待機（CPU負荷軽減）
-        sleep_ms(1);
+        // 待機
+        sleep_ms(100);
     }
     
     return 0;
