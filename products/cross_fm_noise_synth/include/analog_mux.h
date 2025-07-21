@@ -28,13 +28,13 @@ public:
     };
 
     // コンストラクタ
-    AnalogMux() : last_scan_time_(0), current_channel_(0) {
+    AnalogMux() : last_scan_time_(0), current_channel_(0), config_({}) {
         // 配列を初期化
         for (int i = 0; i < NUM_CHANNELS; i++) {
             raw_values_[i] = 0;
             float_values_[i] = 0.0f;
         }
-        // config_は Init() で設定されるため、ここでは初期化不要
+        // config_は Init() で適切な値に設定される
     }
 
     void Init(const Config& config)
