@@ -2,6 +2,10 @@
 全て日本語で回答して下さい
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## コミット設定
+- コミットメッセージにClaude Code署名や共同著者行を含めない
+- シンプルなコミットメッセージのみ使用
+
 ## GitHub Actions CI/CD Pipeline
 - 完全なCI/CDパイプラインが実装済み
 - コミット後は必ずGitHub Actionsのログを確認してエラー対応を実行
