@@ -43,6 +43,10 @@ CMakeCache.txt
 cmake_install.cmake
 Makefile
 *.cmake
+# But keep important CMake files
+!**/pico_*_import.cmake
+!**/pico_extras_import.cmake
+!**/pico_sdk_import.cmake
 
 # Logs
 *.log
