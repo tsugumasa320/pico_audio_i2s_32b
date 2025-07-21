@@ -48,9 +48,16 @@ enum {
     kAnalogIn   = 26, // ADC input pin
 };
 
-// バッファ設定（参照版と完全同じ）
+// バッファ設定（参照版により忠実な設定）
 #define BUFFER_SIZE 2
-#define SAMPLES_PER_BUFFER 1156
+
+// 設定可能なバッファサイズ（参照版に近い低レイテンシー設定）
+#ifndef SAMPLES_PER_BUFFER
+#define SAMPLES_PER_BUFFER 64   // 低レイテンシー（参照版に近い）
+// #define SAMPLES_PER_BUFFER 128  // バランス型
+// #define SAMPLES_PER_BUFFER 256  // 標準
+// #define SAMPLES_PER_BUFFER 1156 // 大きなバッファ（元の値）
+#endif
 
 // グローバル変数
 static bool audio_enabled = false;
@@ -144,8 +151,11 @@ void core1_audio_loop() {
             const int val6 = (int)(g_analog_mux.GetNormalizedValue(6) * 1023);
             const int val7 = (int)(g_analog_mux.GetNormalizedValue(7) * 1023);
             
-            // 1ブロック分のサンプルを生成（参照版と完全同じ）
-            for (int s = 0; s < BUFFER_SIZE; s++) {
+            // 参照版のサンプル生成ロジックを完全再現
+            // ArduinoのBUFFER_SIZE=2サンプルずつ処理をPico SDKの1156サンプルバッファに変換
+            for (uint32_t i = 0; i < sample_count; i += BUFFER_SIZE) {
+                // BUFFER_SIZE分のサンプルを生成（参照版と完全同じ）
+                for (int s = 0; s < BUFFER_SIZE && (i + s) < sample_count; s++) {
                 // 参照版と完全同じ条件分岐（val0=0で最高音質）
                 if (val0 > 0) { // ここは0が一番音が良い気がする
                     out1 = fm1.Process();
@@ -172,10 +182,10 @@ void core1_audio_loop() {
                 // ボリューム適用（参照版と完全同じdBスケーリング）
                 mixed_out *= dbtoa(scaleValue(val7, 0, 1023, -70.0f, 6.0f));
 
-                // 参照版と完全同じサンプル変換と出力
-                sample = (int32_t)(mixed_out * 2147483647.0f); // float2int32相当
-                samples[s * 2 + 0] = sample;  // Left
-                samples[s * 2 + 1] = sample;  // Right
+                    // 参照版と完全同じサンプル変換と出力
+                    sample = (int32_t)(mixed_out * 2147483647.0f); // float2int32相当
+                    samples[(i + s) * 2 + 0] = sample;  // Left
+                    samples[(i + s) * 2 + 1] = sample;  // Right
 
                 // 出力音のレベルを監視して、一定より小さかったらFMシンセのパラメータをランダムに動かす（参照版完全再現）
                 if (fabsf(mixed_out) < 0.01f) {
@@ -200,6 +210,7 @@ void core1_audio_loop() {
                     fm2.SetRatio(scaleValue(val5, 0, 1023, 0.0f, 20.0f) * out1); // 出力値を基にレシオを設定
                     // オーバードライブのドライブを動的に設定
                     overdrive.SetDrive(scaleValue(val6, 0, 1023, 0.0f, 1.0f)); // 出力値を基にドライブを設定
+                }
                 }
             }
             
