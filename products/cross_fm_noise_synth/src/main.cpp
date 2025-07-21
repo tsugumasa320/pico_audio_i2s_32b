@@ -49,7 +49,6 @@ enum {
 };
 
 // バッファ設定（参照版と同じ）
-#define BUFFER_SIZE 2
 #define SAMPLES_PER_BUFFER 1156
 
 // グローバル変数
@@ -119,6 +118,13 @@ void core1_audio_loop() {
     
     // 参照版の変数
     static float out1, out2, mixed_out;
+    static uint32_t last_update_time = 0;
+    
+    // ベースパラメータ（参照版と同じ）
+    static float base_freq1 = 440.0f, base_freq2 = 330.0f;
+    static float base_index1 = 5.0f, base_index2 = 3.0f;
+    static float base_ratio1 = 0.5f, base_ratio2 = 0.33f;
+    static float drive = 0.5f, volume = 0.5f;
     
     while (true) {
         audio_buffer_t *buffer = take_audio_buffer(g_audio_pool, true);
@@ -131,32 +137,40 @@ void core1_audio_loop() {
         const uint32_t sample_count = buffer->max_sample_count;
 
         if (audio_enabled) {
-            // アナログマルチプレクサーの値を取得
-            g_analog_mux.Update();
-            const int val0 = (int)(g_analog_mux.GetNormalizedValue(0) * 1023);
-            const int val1 = (int)(g_analog_mux.GetNormalizedValue(1) * 1023);
-            const int val2 = (int)(g_analog_mux.GetNormalizedValue(2) * 1023);
-            const int val3 = (int)(g_analog_mux.GetNormalizedValue(3) * 1023);
-            const int val4 = (int)(g_analog_mux.GetNormalizedValue(4) * 1023);
-            const int val5 = (int)(g_analog_mux.GetNormalizedValue(5) * 1023);
-            const int val6 = (int)(g_analog_mux.GetNormalizedValue(6) * 1023);
-            const int val7 = (int)(g_analog_mux.GetNormalizedValue(7) * 1023);
-            
-            // 参照版と同じ処理：BUFFER_SIZE分のサンプルを生成
-            for (int s = 0; s < BUFFER_SIZE && s < sample_count; s++) {
-                // 参照版の条件分岐（FM1 ON/OFF）
-                if (val0 > 0) { 
-                    out1 = fm1.Process();
-                } else {
-                    out1 = 0.0f;
-                }
+            // パラメータ更新（50msごと、参照版と同じ）
+            uint32_t current_time = to_ms_since_boot(get_absolute_time());
+            if (current_time - last_update_time > 50) {
+                g_analog_mux.Update();
                 
-                // 参照版の条件分岐（FM2 ON/OFF）
-                if (val3 > 0) {
-                    out2 = fm2.Process();
-                } else {
-                    out2 = 0.0f;
-                }
+                // ノブ値取得（正規化値 0.0-1.0）
+                float knob0 = g_analog_mux.GetNormalizedValue(0); // FM1 周波数ベース
+                float knob1 = g_analog_mux.GetNormalizedValue(1); // FM1 インデックスベース
+                float knob2 = g_analog_mux.GetNormalizedValue(2); // FM1 比率ベース
+                float knob3 = g_analog_mux.GetNormalizedValue(3); // FM2 周波数ベース
+                float knob4 = g_analog_mux.GetNormalizedValue(4); // FM2 インデックスベース
+                float knob5 = g_analog_mux.GetNormalizedValue(5); // FM2 比率ベース
+                float knob6 = g_analog_mux.GetNormalizedValue(6); // オーバードライブ
+                float knob7 = g_analog_mux.GetNormalizedValue(7); // ボリューム
+                
+                // 参照版と同じマッピング
+                base_freq1 = 100.0f + knob0 * 900.0f;  // 100-1000Hz
+                base_index1 = knob1 * 20.0f;           // 0-20
+                base_ratio1 = 0.1f + knob2 * 4.9f;     // 0.1-5.0
+                base_freq2 = 100.0f + knob3 * 900.0f;  // 100-1000Hz
+                base_index2 = knob4 * 20.0f;           // 0-20
+                base_ratio2 = 0.1f + knob5 * 4.9f;     // 0.1-5.0
+                drive = knob6;                          // 0.0-1.0
+                volume = knob7 * knob7;                 // 指数カーブ
+                
+                overdrive.SetDrive(drive);
+                last_update_time = current_time;
+            }
+            
+            // 全バッファサンプルを処理（参照版と同じ）
+            for (uint32_t i = 0; i < sample_count; i++) {
+                // FMシンセ処理
+                out1 = fm1.Process();
+                out2 = fm2.Process();
 
                 // ミキシング（平均化）
                 mixed_out = (out1 + out2) * 0.5f;
@@ -168,42 +182,29 @@ void core1_audio_loop() {
                 mixed_out = dcBlock.Process(mixed_out);
                 mixed_out = daisysp::fclamp(mixed_out, -1.0f, 1.0f);
                 
-                // ボリューム適用（参照版と同じdB範囲）
-                mixed_out *= dbtoa(scaleValue(val7, 0, 1023, -70.0f, 6.0f));
+                // ボリューム適用
+                mixed_out *= volume;
 
                 // 32bit signed integerに変換
                 int32_t sample_value = (int32_t)(mixed_out * 0x7FFFFF00);
                 
                 // ステレオ出力
-                if (s < sample_count) {
-                    samples[s * 2 + 0] = sample_value;  // Left
-                    samples[s * 2 + 1] = sample_value;  // Right
-                }
+                samples[i * 2 + 0] = sample_value;  // Left
+                samples[i * 2 + 1] = sample_value;  // Right
 
-                // 参照版のクロスモジュレーション処理（2サンプルごと）
-                if (s % 2 == 0) {
-                    // 1つ目のFMシンセをout2で変調（参照版通り生の値を使用）
-                    fm1.SetFrequency(scaleValue(val0, 0, 1023, 0.0f, 1000.0f) * out2);
-                    fm1.SetIndex(scaleValue(val1, 0, 1023, 0.0f, 20.0f) * out2);
-                    fm1.SetRatio(scaleValue(val2, 0, 1023, 0.0f, 20.0f) * out2);
+                // クロスモジュレーション処理（数サンプルごと、参照版と同じ）
+                if (i % 16 == 0) {
+                    // 適切なクロスモジュレーション（ベース値+変調）
+                    float mod1 = out2 * 0.5f;  // FM2の出力でFM1を変調
+                    float mod2 = out1 * 0.5f;  // FM1の出力でFM2を変調
                     
-                    // 2つ目のFMシンセをout1で変調（参照版通り生の値を使用）
-                    fm2.SetFrequency(scaleValue(val3, 0, 1023, 0.0f, 1000.0f) * out1);
-                    fm2.SetIndex(scaleValue(val4, 0, 1023, 0.0f, 20.0f) * out1);
-                    fm2.SetRatio(scaleValue(val5, 0, 1023, 0.0f, 20.0f) * out1);
+                    fm1.SetFrequency(base_freq1 + mod1 * base_freq1 * 0.2f);
+                    fm1.SetIndex(base_index1 + mod1 * base_index1 * 0.5f);
+                    fm1.SetRatio(base_ratio1 + mod1 * 0.5f);
                     
-                    // オーバードライブのドライブ設定
-                    overdrive.SetDrive(scaleValue(val6, 0, 1023, 0.0f, 1.0f));
-                }
-
-                // 出力音のレベルが小さい場合のランダム処理（参照版と同じ）
-                if (fabsf(mixed_out) < 0.01f) {
-                    fm1.SetFrequency(100 + (rand() % 900)); // 100-1000Hz
-                    fm1.SetIndex(rand() % 20); // 0-20
-                    fm1.SetRatio(1 + (rand() % 19)); // 1-20
-                    fm2.SetFrequency(100 + (rand() % 900));
-                    fm2.SetIndex(rand() % 20);
-                    fm2.SetRatio(1 + (rand() % 19));
+                    fm2.SetFrequency(base_freq2 + mod2 * base_freq2 * 0.2f);
+                    fm2.SetIndex(base_index2 + mod2 * base_index2 * 0.5f);
+                    fm2.SetRatio(base_ratio2 + mod2 * 0.5f);
                 }
             }
             
@@ -270,7 +271,7 @@ bool init_synth() {
         .pin_s2 = kPinS2,
         .adc_pin = kAnalogIn,
         .adc_channel = 0,
-        .scan_period_ms = 1, // 参照版と同じ高速スキャン
+        .scan_period_ms = 10, // 参照版と同じスキャン周期
         .enable_active_low = true
     };
     g_analog_mux.Init(mux_config);
