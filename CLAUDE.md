@@ -441,3 +441,160 @@ gpio_put(PIN_DCDC_PSM_CTRL, 1); // PWMモード
 - メモリリーク防止の徹底
 - プラットフォーム依存部分の分離
 - 自動テストの充実
+
+## Cross FM Noise Synthesizer 開発ノウハウ
+
+### プロジェクト概要
+products/cross_fm_noise_synth/ - DaisySPとPico SDKを統合した2オペレーターFM相互変調シンセサイザー
+
+### 開発プロセスと重要な学び
+
+#### 1. 音声出力のトラブルシューティング手法
+
+**段階的デバッグアプローチ**:
+```cpp
+// 1. シンプルなサイン波から開始
+#define DEBUG_FALLBACK_SINE 1   // フォールバック用サイン波
+// 2. 単一FMシンセ
+// 3. デュアルFMシンセ + クロスモジュレーション
+// 4. エフェクトチェーン追加
+```
+
+**音が出ない問題の切り分け**:
+- LEDデバッグで実行状況を視覚確認
+- バッファ処理の範囲確認（1156サンプル中2サンプルのみ処理など）
+- DaisySP初期化の問題切り分け
+
+#### 2. DaisySP統合のベストプラクティス
+
+**正しい初期化順序**:
+```cpp
+const float sample_rate = 48000.0f;  // 参照版と一致させる
+fm1.Init(sample_rate);
+fm1.SetFrequency(440.0f);
+fm1.SetRatio(0.5f); 
+fm1.SetIndex(100.0f);
+```
+
+**避けるべき問題**:
+- サンプルレート不一致（44.1kHz vs 48kHz）
+- 初期化前のProcess()呼び出し
+- パラメータ範囲外設定
+
+#### 3. アナログマルチプレクサー（74HC4051）実装
+
+**高速スキャン設定**:
+```cpp
+AnalogMux::Config mux_config = {
+    .scan_period_ms = 1,  // 1ms高速スキャン（参照版準拠）
+    .enable_active_low = true
+};
+```
+
+**ピンアサイン（参照版と完全一致）**:
+- GP0: /EN (Enable, active low)
+- GP1: S2, GP2: S1, GP3: S0 (Select bits)
+- GP26: COM (ADC input)
+
+#### 4. 意図的破綻設計の実装
+
+**参照版の「美しいバグ」の再現**:
+```cpp
+// val0=0で最高音質になる逆転ロジック
+if (val0 > 0) { // ここは0が一番音が良い気がする
+    out1 = fm1.Process();
+} else {
+    out1 = 0.0f;
+}
+
+// 直接乗算による意図的クロスモジュレーション（破綻の原因）
+if (i % 2 == 0) {
+    fm1.SetFrequency(scaleValue(val0, 0, 1023, 0.0f, 1000.0f) * out2);
+    fm2.SetFrequency(scaleValue(val3, 0, 1023, 0.0f, 1000.0f) * out1);
+}
+```
+
+#### 5. Arduino→Pico SDK変換のコツ
+
+**バッファ処理の変換**:
+```cpp
+// Arduino: BUFFER_SIZE = 2 サンプルずつ処理
+// Pico SDK: sample_countサンプル一括処理
+for (uint32_t i = 0; i < sample_count; i++) {
+    // 処理内容
+}
+```
+
+**環境固有の関数置換**:
+- `random()` → `rand()`
+- `delay()` → `sleep_ms()`
+- `millis()` → `to_ms_since_boot(get_absolute_time())`
+
+#### 6. デバッグテクニック
+
+**LEDによる視覚デバッグ**:
+```cpp
+const uint LED_PIN = 25;  // Pico 2内蔵LED
+// 起動確認: 3回点滅
+// 初期化完了: 常時点灯  
+// 音声処理中: 1秒ごと点滅
+```
+
+**シリアル出力が使えない場合**:
+- BOOTSELモード転送確認
+- LEDパターンによる状態把握
+- ビルド時間スタンプでの転送確認
+
+#### 7. パフォーマンス最適化
+
+**設定可能バッファサイズ**:
+```cpp
+#ifndef SAMPLES_PER_BUFFER
+#define SAMPLES_PER_BUFFER 64   // 低レイテンシー
+// #define SAMPLES_PER_BUFFER 128  // バランス
+// #define SAMPLES_PER_BUFFER 256  // 標準
+// #define SAMPLES_PER_BUFFER 1156 // 高安定性
+#endif
+```
+
+**リアルタイム処理の注意点**:
+- Core1での音声処理分離
+- バッファあたりの処理時間制限
+- パラメータ更新頻度の調整
+
+#### 8. 参照実装との互換性維持
+
+**重要な設定値**:
+- サンプルレート: 48000Hz（44100Hzではない）
+- DAC_ZERO: 1（0ではない）
+- スキャン周期: 1ms（10msではない）
+- ボリュームスケーリング: -70dB〜+6dB
+
+**音色の再現**:
+- FM1: 440Hz, ratio=0.5, index=100
+- FM2: 330Hz, ratio=0.33, index=50
+- クロスモジュレーション周期: 2サンプルごと
+
+#### 9. よくある問題と解決法
+
+**問題**: 音量が小さすぎる
+**解決**: dBスケーリングとアナログ音量の併用
+
+**問題**: 音が断続的
+**解決**: バッファアンダーランの確認、処理時間測定
+
+**問題**: ノイズや歪み
+**解決**: DCDCのPWMモード設定、グラウンドループ対策
+
+#### 10. 今後の拡張可能性
+
+**追加可能なエフェクト**:
+- DCブロックフィルター
+- アンチエイリアシングフィルター
+- 3バンドEQ
+- リバーブ・ディレイ
+
+**インターフェース拡張**:
+- MIDI入力対応
+- 複数プリセット保存
+- ウェブベースコントロール
