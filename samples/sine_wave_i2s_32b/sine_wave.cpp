@@ -33,6 +33,7 @@
 #include "pico/stdlib.h"
 #include "pico/audio.h"
 #include "pico/audio_i2s.h"
+#include "analog_mux.h"
 
 // =============================================================================
 // 定数定義
@@ -95,6 +96,28 @@ uint32_t pos1 = 0;          // 右チャンネルの位相
 
 const uint32_t pos_max = 0x10000 * SINE_WAVE_TABLE_LEN; // 位相の最大値
 uint vol = 8;               // 音量レベル（0-256）- 歪み防止のため低減
+
+// アナログマルチプレクサー設定
+static AnalogMux g_analog_mux;
+enum {
+    kPinNEnable = 0,  // Enable pin (active low) - 74HC4051の/ENピン
+    kPinS0      = 3,  // Select pin S0 - 74HC4051のS0ピン
+    kPinS1      = 2,  // Select pin S1 - 74HC4051のS1ピン
+    kPinS2      = 1,  // Select pin S2 - 74HC4051のS2ピン
+    kAnalogIn   = 26, // ADC input pin - 74HC4051のCOMピンからの入力
+};
+
+// ノブ機能の定義
+enum KnobFunction {
+    KNOB_VOLUME = 0,     // ノブ0: マスターボリューム
+    KNOB_LEFT_FREQ = 1,  // ノブ1: 左チャンネル周波数
+    KNOB_RIGHT_FREQ = 2, // ノブ2: 右チャンネル周波数
+    KNOB_UNUSED3 = 3,    // ノブ3: 未使用
+    KNOB_UNUSED4 = 4,    // ノブ4: 未使用
+    KNOB_UNUSED5 = 5,    // ノブ5: 未使用
+    KNOB_UNUSED6 = 6,    // ノブ6: 未使用
+    KNOB_UNUSED7 = 7,    // ノブ7: 未使用
+};"}
 
 // =============================================================================
 // ユーティリティ関数
@@ -270,6 +293,21 @@ int main() {
     gpio_init(PIN_DCDC_PSM_CTRL);
     gpio_set_dir(PIN_DCDC_PSM_CTRL, GPIO_OUT);
     gpio_put(PIN_DCDC_PSM_CTRL, 1); // PWMモードでオーディオノイズを低減
+    
+    // アナログマルチプレクサー初期化
+    printf("アナログマルチプレクサー初期化中...\n");
+    AnalogMux::Config mux_config = {
+        .pin_enable = kPinNEnable,
+        .pin_s0 = kPinS0,
+        .pin_s1 = kPinS1,
+        .pin_s2 = kPinS2,
+        .adc_pin = kAnalogIn,
+        .adc_channel = 0,  // ADC channel 0 for pin 26
+        .scan_period_ms = 10,
+        .enable_active_low = true
+    };
+    g_analog_mux.Init(mux_config);
+    printf("アナログマルチプレクサー初期化完了\n");
 
     // =============================================================================
     // サイン波テーブルの生成
@@ -292,29 +330,67 @@ int main() {
     // =============================================================================
     
     while (true) {
-        int c = getchar_timeout_us(0);  // ノンブロッキングで文字入力を取得
-        if (c >= 0) {
-            // 音量制御
-            if (c == '-' && vol) vol--;                    // 音量ダウン
-            if ((c == '=' || c == '+') && vol < 256) vol++; // 音量アップ
+        // アナログマルチプレクサーの値を更新
+        g_analog_mux.Update();
+        
+        // ノブの値を取得 (0.0-1.0に正規化済み)
+        float knob_volume = g_analog_mux.GetNormalizedValue(KNOB_VOLUME);     // 音量制御
+        float knob_left_freq = g_analog_mux.GetNormalizedValue(KNOB_LEFT_FREQ);  // 左チャンネル周波数
+        float knob_right_freq = g_analog_mux.GetNormalizedValue(KNOB_RIGHT_FREQ); // 右チャンネル周波数
+        
+        // パラメーターをマッピング
+        static uint32_t last_update_time = 0;
+        uint32_t current_time = _millis();
+        
+        if (current_time - last_update_time > 50) {  // 50msごとに更新
+            // 音量: 0-32の範囲にマッピング（歪み防止のため上限制限）
+            uint new_vol = (uint)(knob_volume * 32);
             
-            // 左チャンネル周波数制御
-            if (c == '[' && step0 > 0x10000) step0 -= 0x10000;  // 周波数ダウン
-            if (c == ']' && step0 < (SINE_WAVE_TABLE_LEN / 16) * 0x20000) step0 += 0x10000; // 周波数アップ
+            // 左チャンネル周波数: 100Hz-2000Hz相当の範囲
+            uint32_t new_step0 = 0x10000 + (uint32_t)(knob_left_freq * (0x200000 - 0x10000));
             
-            // 右チャンネル周波数制御
-            if (c == '{' && step1 > 0x10000) step1 -= 0x10000;  // 周波数ダウン
-            if (c == '}' && step1 < (SINE_WAVE_TABLE_LEN / 16) * 0x20000) step1 += 0x10000; // 周波数アップ
+            // 右チャンネル周波数: 100Hz-2000Hz相当の範囲
+            uint32_t new_step1 = 0x10000 + (uint32_t)(knob_right_freq * (0x200000 - 0x10000));
             
-            // 終了
-            if (c == 'q') break;
+            // 値を更新（変化があった場合のみ）
+            if (abs((int)vol - (int)new_vol) > 1) {
+                vol = new_vol;
+            }
             
-            // 現在の設定値を表示
-            printf("音量=%d, 左Ch周波数=%d, 右Ch周波数=%d      \r", 
-                   static_cast<int>(vol), 
-                   static_cast<int>(step0 >> 16), 
-                   static_cast<int>(step1 >> 16));
+            if (abs((int)(step0 >> 16) - (int)(new_step0 >> 16)) > 10) {
+                step0 = new_step0;
+            }
+            
+            if (abs((int)(step1 >> 16) - (int)(new_step1 >> 16)) > 10) {
+                step1 = new_step1;
+            }
+            
+            last_update_time = current_time;
         }
+        
+        // キーボード入力処理（デバッグ用）
+        int c = getchar_timeout_us(0);
+        if (c >= 0) {
+            // 手動制御
+            if (c == '-' && vol) vol--;
+            if ((c == '=' || c == '+') && vol < 256) vol++;
+            if (c == '[' && step0 > 0x10000) step0 -= 0x10000;
+            if (c == ']' && step0 < (SINE_WAVE_TABLE_LEN / 16) * 0x20000) step0 += 0x10000;
+            if (c == '{' && step1 > 0x10000) step1 -= 0x10000;
+            if (c == '}' && step1 < (SINE_WAVE_TABLE_LEN / 16) * 0x20000) step1 += 0x10000;
+            if (c == 'q') break;
+        }
+        
+        // 5秒ごとに現在の設定値を表示
+        static uint32_t last_debug_time = 0;
+        if (current_time - last_debug_time > 5000) {
+            printf("Knobs: Vol=%.2f(=%d) L=%.2f(=%d) R=%.2f(=%d)\n", 
+                   knob_volume, vol, knob_left_freq, (int)(step0 >> 16), knob_right_freq, (int)(step1 >> 16));
+            last_debug_time = current_time;
+        }
+        
+        // 短い待機
+        sleep_ms(10);
     }
     
     printf("\n\nシャットダウン中...\n");

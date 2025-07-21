@@ -5,21 +5,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Pico SDK initialization
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 # pico-extras is required for pico_util_buffer dependency
-if(DEFINED ENV{PICO_EXTRAS_PATH})
-    include($ENV{PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
-else()
-    # Try local path
-    set(LOCAL_PICO_EXTRAS_PATH ${CMAKE_CURRENT_LIST_DIR}/../../libs/pico-extras)
-    if(EXISTS ${LOCAL_PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
-        set(PICO_EXTRAS_PATH ${LOCAL_PICO_EXTRAS_PATH})
-        include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
-    else()
-        message(FATAL_ERROR "pico-extras is required but not found. Please set PICO_EXTRAS_PATH environment variable or ensure libs/pico-extras exists.")
-    endif()
-endif()
+set(PICO_EXTRAS_PATH ${CMAKE_CURRENT_LIST_DIR}/../../libs/pico-extras)
+include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
 
 # Cross FM Noise Synthesizer
-project(cross_fm_noise_synth)
+project(cross_fm_noise_synth C CXX ASM)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 
 pico_sdk_init()
 
@@ -56,12 +48,7 @@ endif()
 # Add executable
 add_executable(cross_fm_noise_synth
     src/main.cpp
-    src/fm_engine.cpp
-    src/noise_generator.cpp
-    src/cross_modulator.cpp
-    src/ui_controller.cpp
-    src/preset_manager.cpp
-    src/analog_multiplexer.c
+    src/biquad_rbj.cpp
 )
 
 # Include directories

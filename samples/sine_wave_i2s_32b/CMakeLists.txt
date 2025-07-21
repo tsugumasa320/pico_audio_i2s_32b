@@ -8,13 +8,8 @@ if(DEFINED ENV{PICO_EXTRAS_PATH})
     include($ENV{PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
 else()
     # Try local path
-    set(LOCAL_PICO_EXTRAS_PATH ${CMAKE_CURRENT_LIST_DIR}/../../libs/pico-extras)
-    if(EXISTS ${LOCAL_PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
-        set(PICO_EXTRAS_PATH ${LOCAL_PICO_EXTRAS_PATH})
-        include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
-    else()
-        message(FATAL_ERROR "pico-extras is required but not found. Please set PICO_EXTRAS_PATH environment variable or ensure libs/pico-extras exists.")
-    endif()
+    set(PICO_EXTRAS_PATH ${CMAKE_CURRENT_LIST_DIR}/../../libs/pico-extras)
+    include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
 endif()
 
 set(project_name "sine_wave_i2s_32b" C CXX ASM)
@@ -40,6 +35,7 @@ target_link_libraries(${bin_name} PRIVATE
     pico_audio_32b
     pico_audio_i2s_32b
     pico_util_buffer
+    hardware_adc
 )
 
 # set PIO and DMA for I2S

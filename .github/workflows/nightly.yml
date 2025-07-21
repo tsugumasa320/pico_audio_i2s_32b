@@ -33,6 +33,20 @@ jobs:
         with:
           submodules: true
 
+      - name: Setup Pico SDK and dependencies
+        run: |
+          # Pico SDKをクローン
+          git clone -b 2.1.1 --depth 1 https://github.com/raspberrypi/pico-sdk.git /external/pico-sdk
+          cd /external/pico-sdk
+          git submodule update --init
+          
+          # 環境変数をGitHub Actionsの環境に設定
+          echo "PICO_SDK_PATH=/external/pico-sdk" >> $GITHUB_ENV
+          echo "PICO_EXTRAS_PATH=${{ github.workspace }}/libs/pico-extras" >> $GITHUB_ENV
+          
+          # pico_extras_import.cmakeのパスを修正（ルートディレクトリにコピー）
+          cp ${{ github.workspace }}/libs/pico-extras/external/pico_extras_import.cmake ${{ github.workspace }}/libs/pico-extras/pico_extras_import.cmake
+
       - name: Find all sample projects
         id: find_samples
         run: |
@@ -93,13 +107,31 @@ jobs:
           submodules: true
           fetch-depth: 50  # 過去50コミットを取得
 
+      - name: Setup Pico SDK and dependencies
+        run: |
+          # Pico SDKをクローン
+          git clone -b 2.1.1 --depth 1 https://github.com/raspberrypi/pico-sdk.git /external/pico-sdk
+          cd /external/pico-sdk
+          git submodule update --init
+          
+          # ARM GCCツールチェーンをインストール
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi
+          
+          # 環境変数をGitHub Actionsの環境に設定
+          echo "PICO_SDK_PATH=/external/pico-sdk" >> $GITHUB_ENV
+          echo "PICO_EXTRAS_PATH=${{ github.workspace }}/libs/pico-extras" >> $GITHUB_ENV
+          
+          # pico_extras_import.cmakeのパスを修正
+          cp ${{ github.workspace }}/libs/pico-extras/external/pico_extras_import.cmake ${{ github.workspace }}/libs/pico-extras/pico_extras_import.cmake
+
       - name: Build current version
-        uses: elehobica/build-pico@v1
-        with:
-          path: samples/sine_wave_i2s_32b
-          build: build_current
-          platform: rp2040
-          board: pico
+        run: |
+          cd samples/sine_wave_i2s_32b
+          mkdir -p build_current
+          cd build_current
+          cmake -DPICO_PLATFORM=rp2040 -DPICO_BOARD=pico ..
+          make -j$(nproc)
 
       - name: Analyze memory usage
         run: |
@@ -129,6 +161,20 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
+
+      - name: Setup Pico SDK and dependencies
+        run: |
+          # Pico SDKをクローン
+          git clone -b 2.1.1 --depth 1 https://github.com/raspberrypi/pico-sdk.git /external/pico-sdk
+          cd /external/pico-sdk
+          git submodule update --init
+          
+          # 環境変数をGitHub Actionsの環境に設定
+          echo "PICO_SDK_PATH=/external/pico-sdk" >> $GITHUB_ENV
+          echo "PICO_EXTRAS_PATH=${{ github.workspace }}/libs/pico-extras" >> $GITHUB_ENV
+          
+          # pico_extras_import.cmakeのパスを修正
+          cp ${{ github.workspace }}/libs/pico-extras/external/pico_extras_import.cmake ${{ github.workspace }}/libs/pico-extras/pico_extras_import.cmake
 
       - name: Compile-time benchmark
         run: |
@@ -190,7 +236,7 @@ jobs:
             cd libs/pico-extras
             # pico-extrasの基本的な構造をチェック
             [ -d "src" ] || (echo "pico-extras src directory missing" && exit 1)
-            [ -f "pico_extras_import.cmake" ] || (echo "pico_extras_import.cmake missing" && exit 1)
+            [ -f "external/pico_extras_import.cmake" ] || (echo "pico_extras_import.cmake missing" && exit 1)
             echo "✅ pico-extras structure is valid"
           else
             echo "❌ pico-extras directory not found"
