@@ -1,6 +1,5 @@
 {
     "version": "2.0.0",
-    // VS Code Tasks Configuration for Pico Audio I2S 32b
     "tasks": [
         {
             "label": "Configure CMake",
