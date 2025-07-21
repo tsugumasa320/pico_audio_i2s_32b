@@ -18,6 +18,7 @@
 #include "hardware/adc.h"
 #include "hardware/clocks.h"
 #include "hardware/pll.h"
+#include "hardware/gpio.h"
 
 // DaisySP includes
 #include "daisysp.h"
@@ -48,16 +49,16 @@ enum {
     kAnalogIn   = 26, // ADC input pin
 };
 
-// バッファ設定（参照版により忠実な設定）
-#define BUFFER_SIZE 2
-
-// 設定可能なバッファサイズ（参照版に近い低レイテンシー設定）
+// 設定可能なバッファサイズ
 #ifndef SAMPLES_PER_BUFFER
 #define SAMPLES_PER_BUFFER 64   // 低レイテンシー（参照版に近い）
 // #define SAMPLES_PER_BUFFER 128  // バランス型
 // #define SAMPLES_PER_BUFFER 256  // 標準
 // #define SAMPLES_PER_BUFFER 1156 // 大きなバッファ（元の値）
 #endif
+
+// デバッグ用フラグ
+#define DEBUG_FALLBACK_SINE 0   // 1にすると問題切り分け用のサイン波に切り替え（テスト中）
 
 // グローバル変数
 static bool audio_enabled = false;
@@ -94,35 +95,35 @@ void core1_audio_loop() {
     printf("Core1 FM Cross-Modulation processing started\n");
     uint32_t buffer_count = 0;
     
-    // DaisySPオブジェクトの初期化（参照版と完全同じサンプルレート）
+    // **LEDデバッグ：音声処理の状態を視覚化**
+    const uint LED_PIN = 25;  // Pico 2の内蔵LED
+    static bool led_state = false;
+    
+    // **参照版の2つのFMシンセ初期化**
     const float sample_rate = 48000.0f;
     
+    printf("Initializing DaisySP Cross FM synth at %.0fHz...\n", sample_rate);
+    
+    // FM1初期化（参照版と同じ設定）
     fm1.Init(sample_rate);
-    fm1.SetFrequency(440);
+    fm1.SetFrequency(440.0f);
     fm1.SetRatio(0.5f);
     fm1.SetIndex(100.0f);
+    printf("FM1 initialized: 440Hz, ratio=0.5, index=100\n");
     
+    // FM2初期化（参照版と同じ設定）
     fm2.Init(sample_rate);
-    fm2.SetFrequency(330);
+    fm2.SetFrequency(330.0f);
     fm2.SetRatio(0.33f);
     fm2.SetIndex(50.0f);
+    printf("FM2 initialized: 330Hz, ratio=0.33, index=50\n");
     
+    // オーバードライブ初期化（参照版と同じ）
     overdrive.Init();
     overdrive.SetDrive(0.5f);
+    printf("Overdrive initialized with drive=0.5\n");
     
-    dcBlock.Init(sample_rate);
-    
-    antiAliasFilter1.Init(sample_rate);
-    antiAliasFilter1.SetType(LOWPASS);
-    antiAliasFilter1.SetCutoff(sample_rate / 2 * 0.9f); // ナイキスト周波数の90%（参照版と同じ）
-    antiAliasFilter1.SetQ(1.0f);
-    
-    antiAliasFilter2.Init(sample_rate);
-    antiAliasFilter2.SetType(LOWPASS);
-    antiAliasFilter2.SetCutoff(sample_rate / 2 * 0.9f); // ナイキスト周波数の90%（参照版と同じ）
-    antiAliasFilter2.SetQ(1.0f);
-    
-    printf("DaisySP objects initialized\n");
+    printf("Cross FM synthesizer with overdrive initialized successfully\n");
     
     // 参照版と完全同じ変数
     static float out1, out2, mixed_out;
@@ -140,6 +141,12 @@ void core1_audio_loop() {
         const uint32_t sample_count = buffer->max_sample_count;
 
         if (audio_enabled) {
+            // **LEDデバッグ：音声処理中であることを示す（1秒ごとに点滅）**
+            if (buffer_count % 750 == 0) {  // 約1秒ごと（64samples×750≈48000samples≈1秒）
+                led_state = !led_state;
+                gpio_put(LED_PIN, led_state);
+            }
+            
             // アナログマルチプレクサーの値を取得（参照版と完全同じ）
             g_analog_mux.Update();
             const int val0 = (int)(g_analog_mux.GetNormalizedValue(0) * 1023);
@@ -151,12 +158,22 @@ void core1_audio_loop() {
             const int val6 = (int)(g_analog_mux.GetNormalizedValue(6) * 1023);
             const int val7 = (int)(g_analog_mux.GetNormalizedValue(7) * 1023);
             
-            // 参照版のサンプル生成ロジックを完全再現
-            // ArduinoのBUFFER_SIZE=2サンプルずつ処理をPico SDKの1156サンプルバッファに変換
-            for (uint32_t i = 0; i < sample_count; i += BUFFER_SIZE) {
-                // BUFFER_SIZE分のサンプルを生成（参照版と完全同じ）
-                for (int s = 0; s < BUFFER_SIZE && (i + s) < sample_count; s++) {
-                // 参照版と完全同じ条件分岐（val0=0で最高音質）
+            // **シンプルFMテスト：1つのFMシンセのみ使用**
+            for (uint32_t i = 0; i < sample_count; i++) {
+#if DEBUG_FALLBACK_SINE
+                // フォールバック用サイン波（問題切り分け用）
+                static float phase = 0.0f;
+                const float freq = 440.0f;
+                const float sample_rate = 48000.0f;
+                const float amplitude = 0.1f;
+                
+                mixed_out = amplitude * sinf(phase);
+                phase += 2.0f * M_PI * freq / sample_rate;
+                if (phase >= 2.0f * M_PI) {
+                    phase -= 2.0f * M_PI;
+                }
+#else
+                // **参照版の意図的破綻設計：val0=0で最高音質**
                 if (val0 > 0) { // ここは0が一番音が良い気がする
                     out1 = fm1.Process();
                 } else {
@@ -172,20 +189,21 @@ void core1_audio_loop() {
                 // ミキシング（平均化）
                 mixed_out = (out1 + out2) * 0.5f;
 
-                // エフェクトチェーン（参照版と同じ順序）
+                // **オーバードライブエフェクト（参照版と同じ順序）**
                 mixed_out = overdrive.Process(mixed_out);
-                mixed_out = antiAliasFilter1.Process(mixed_out);
-                mixed_out = antiAliasFilter2.Process(mixed_out);
-                mixed_out = dcBlock.Process(mixed_out);
-                mixed_out = daisysp::fclamp(mixed_out, -1.0f, 1.0f);
                 
                 // ボリューム適用（参照版と完全同じdBスケーリング）
                 mixed_out *= dbtoa(scaleValue(val7, 0, 1023, -70.0f, 6.0f));
+                
+                // クリッピング防止
+                if (mixed_out > 1.0f) mixed_out = 1.0f;
+                if (mixed_out < -1.0f) mixed_out = -1.0f;
+#endif
 
-                    // 参照版と完全同じサンプル変換と出力
-                    sample = (int32_t)(mixed_out * 2147483647.0f); // float2int32相当
-                    samples[(i + s) * 2 + 0] = sample;  // Left
-                    samples[(i + s) * 2 + 1] = sample;  // Right
+                // 32bit signed integerに変換
+                sample = (int32_t)(mixed_out * 2147483647.0f);
+                samples[i * 2 + 0] = sample;  // Left
+                samples[i * 2 + 1] = sample;  // Right
 
                 // 出力音のレベルを監視して、一定より小さかったらFMシンセのパラメータをランダムに動かす（参照版完全再現）
                 if (fabsf(mixed_out) < 0.01f) {
@@ -198,8 +216,8 @@ void core1_audio_loop() {
                     fm2.SetRatio(1 + (rand() % 19)); // レシオをランダムに設定
                 }
 
-                // 参照版の意図的破網設計（直接乗算によるクロスモジュレーション）
-                if (s % 2 == 0) {
+                // **参照版の意図的破綻設計（直接乗算によるクロスモジュレーション）**
+                if (i % 2 == 0) {
                     // 1つ目のFMシンセのインデックスとレシオを動的に設定
                     fm1.SetFrequency(scaleValue(val0, 0, 1023, 0.0f, 1000.0f) * out2); // 出力値を基に周波数を設定
                     fm1.SetIndex(scaleValue(val1, 0, 1023, 0.0f, 20.0f) * out2); // 出力値を基にインデックスを設定
@@ -208,17 +226,16 @@ void core1_audio_loop() {
                     fm2.SetFrequency(scaleValue(val3, 0, 1023, 0.0f, 1000.0f) * out1); // 出力値を基に周波数を設定
                     fm2.SetIndex(scaleValue(val4, 0, 1023, 0.0f, 20.0f) * out1); // 出力値を基にインデックスを設定
                     fm2.SetRatio(scaleValue(val5, 0, 1023, 0.0f, 20.0f) * out1); // 出力値を基にレシオを設定
-                    // オーバードライブのドライブを動的に設定
+                    // **オーバードライブのドライブを動的に設定（val6で制御）**
                     overdrive.SetDrive(scaleValue(val6, 0, 1023, 0.0f, 1.0f)); // 出力値を基にドライブを設定
-                }
                 }
             }
             
             // デバッグ出力（最初の数バッファ）
             buffer_count++;
             if (buffer_count <= 3) {
-                printf("FM Buffer %d: sample_count=%d, first_sample=0x%08x\n", 
-                       buffer_count, sample_count, samples[0]);
+                printf("FM TEST Buffer %d: sample_count=%d, first_sample=0x%08x, out1=%.4f\n", 
+                       buffer_count, sample_count, samples[0], out1);
             }
         } else {
             // 無音
@@ -244,32 +261,54 @@ void core1_audio_loop() {
 bool init_synth() {
     stdio_init_all();
     
-    printf("=== Cross FM Synthesizer (Reference Version) ===\n");
-    printf("Initializing system...\n");
+    // **LEDデバッグ：プログラムが動作していることを視覚的に確認**
+    const uint LED_PIN = 25;  // Pico 2の内蔵LED
+    gpio_init(LED_PIN);
+    gpio_set_dir(LED_PIN, GPIO_OUT);
     
-    // USBシリアル安定化のための待機
-    sleep_ms(2000);
+    // LEDパターンで起動確認（3回点滅）
+    for (int i = 0; i < 3; i++) {
+        gpio_put(LED_PIN, 1);
+        sleep_ms(200);
+        gpio_put(LED_PIN, 0);
+        sleep_ms(200);
+    }
     
-    // システムクロック設定 (96MHz動作)
-    printf("Setting up system clock to 96MHz...\n");
+    // USBシリアル接続の確実な確立
+    sleep_ms(3000);  // 3秒待機に延長
     
+    printf("=== Cross FM Synthesizer DEBUG VERSION v3.0 ===\n");
+    printf("Build time: " __DATE__ " " __TIME__ "\n");
+    printf("System starting...\n");
+    
+    // 初期化の各ステップでデバッグ出力
+    printf("Step 1: USB Serial established\n");
+    
+    // LED点灯でStep 1完了を表示
+    gpio_put(LED_PIN, 1);
+    
+    // システムクロック設定 (96MHz動作) - 一時的に無効化してテスト
+    printf("Step 2: Skipping system clock reconfiguration for stability\n");
+    /*
     pll_init(pll_usb, 1, 1536 * MHZ, 4, 4);
     clock_configure(clk_usb, 0, CLOCKS_CLK_USB_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB, 96 * MHZ, 48 * MHZ);
     clock_configure(clk_sys, CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX, CLOCKS_CLK_SYS_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB, 96 * MHZ, 96 * MHZ);
     clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS, 96 * MHZ, 96 * MHZ);
     stdio_init_all();
+    */
     
-    printf("System clock configured to 96MHz\n");
+    printf("Step 3: System clock configuration skipped\n");
     
     // DCDC電源制御
+    printf("Step 4: Configuring DCDC for low-noise audio...\n");
     const uint32_t PIN_DCDC_PSM_CTRL = 23;
     gpio_init(PIN_DCDC_PSM_CTRL);
     gpio_set_dir(PIN_DCDC_PSM_CTRL, GPIO_OUT);
     gpio_put(PIN_DCDC_PSM_CTRL, 1);
-    printf("DCDC configured for low-noise audio\n");
+    printf("Step 5: DCDC configured\n");
     
     // アナログマルチプレクサー初期化
-    printf("Initializing analog multiplexer...\n");
+    printf("Step 6: Initializing analog multiplexer...\n");
     AnalogMux::Config mux_config = {
         .pin_enable = kPinNEnable,
         .pin_s0 = kPinS0,
@@ -281,7 +320,7 @@ bool init_synth() {
         .enable_active_low = true
     };
     g_analog_mux.Init(mux_config);
-    printf("Analog multiplexer initialized\n");
+    printf("Step 7: Analog multiplexer initialized\n");
     
     // オーディオシステム初期化（参照版と同じ48kHz）
     static audio_format_t audio_format = {
@@ -365,9 +404,9 @@ int main() {
         return -1;
     }
     
-    printf("Cross FM Synthesizer starting...\n");
-    printf("Knob assignments (same as reference):\n");
-    printf("  val0: FM1 Frequency Base (0-1000Hz)\n");
+    printf("Cross FM Noise Synthesizer starting...\n");
+    printf("Knob assignments (reference version with overdrive):\n");
+    printf("  val0: FM1 Frequency Base (0-1000Hz) - 0 = BEST SOUND!\n");
     printf("  val1: FM1 Index Base (0-20)\n");
     printf("  val2: FM1 Ratio Base (0-20)\n");
     printf("  val3: FM2 Frequency Base (0-1000Hz)\n");
@@ -375,7 +414,7 @@ int main() {
     printf("  val5: FM2 Ratio Base (0-20)\n");
     printf("  val6: Overdrive Drive (0.0-1.0)\n");
     printf("  val7: Master Volume (-70dB to +6dB)\n");
-    printf("Cross-modulation: FM1 modulated by FM2 output, FM2 modulated by FM1 output\n\n");
+    printf("Cross-modulation: FM1 <-> FM2 mutual modulation (intentional chaos!)\n\n");
     
     // メインループ（参照版はArduinoのloop()なので、ここは最小限）
     while (true) {
