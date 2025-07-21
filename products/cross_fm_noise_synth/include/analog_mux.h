@@ -27,6 +27,15 @@ public:
         bool enable_active_low; // Enable pin polarity
     };
 
+    // コンストラクタ
+    AnalogMux() : last_scan_time_(0), current_channel_(0) {
+        // 配列を初期化
+        for (int i = 0; i < NUM_CHANNELS; i++) {
+            raw_values_[i] = 0;
+            float_values_[i] = 0.0f;
+        }
+    }
+
     void Init(const Config& config)
     {
         config_ = config;

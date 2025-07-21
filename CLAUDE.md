@@ -208,104 +208,28 @@ PICO_SDK_PATH=/path/to/pico-sdk PICO_TOOLCHAIN_PATH=/Users/username/.pico-sdk/to
 
 ### アナログマルチプレクサー (74HC4051) 実装
 
-#### 概要
-8個のアナログ入力（ノブ）を1つのADCで読み取るためのマルチプレクサー制御機能を実装済み。
+8個のアナログ入力（ノブ）を1つのADCで読み取るマルチプレクサー機能を実装済み。
 
-#### ファイル構成
+**ファイル構成:**
 - `products/cross_fm_noise_synth/include/analog_mux.h` - マルチプレクサー制御クラス
-- `samples/sine_wave_i2s_32b/analog_mux.h` - 同様の実装（コピー版）
+- `samples/sine_wave_i2s_32b/analog_mux.h` - サンプル実装
 
-#### ハードウェア接続
-```
-74HC4051ピン配置:
-- /EN (Enable, active low) -> GP0
-- S0 (Select bit 0)        -> GP3  
-- S1 (Select bit 1)        -> GP2
-- S2 (Select bit 2)        -> GP1
-- COM (Common output)      -> GP26 (ADC0)
-- VCC                      -> 3.3V
-- GND                      -> GND
-- Y0-Y7                    -> ノブ・ポテンショメーター入力
-```
-
-#### 基本的な使用方法
+**基本的な使用方法:**
 ```cpp
-#include "analog_mux.h"
-
-// 初期化
 AnalogMux g_analog_mux;
 AnalogMux::Config mux_config = {
-    .pin_enable = 0,        // /ENピン
-    .pin_s0 = 3,           // S0ピン
-    .pin_s1 = 2,           // S1ピン
-    .pin_s2 = 1,           // S2ピン
-    .adc_pin = 26,         // ADC入力ピン
-    .adc_channel = 0,      // ADCチャンネル番号
-    .scan_period_ms = 10,  // スキャン周期
+    .pin_enable = 0, .pin_s0 = 3, .pin_s1 = 2, .pin_s2 = 1,
+    .adc_pin = 26, .adc_channel = 0, .scan_period_ms = 10,
     .enable_active_low = true
 };
 g_analog_mux.Init(mux_config);
 
-// メインループ内での値取得
+// 値取得
 g_analog_mux.Update();
-float volume = g_analog_mux.GetNormalizedValue(0);    // ノブ0: 0.0-1.0
-float frequency = g_analog_mux.GetMappedValue(1, 100.0f, 2000.0f); // ノブ1: 100Hz-2000Hz
+float volume = g_analog_mux.GetNormalizedValue(0);  // 0.0-1.0
 ```
 
-#### 機能詳細
-- **スキャン方式**: 順次スキャン（10ms周期でチャンネル切り替え）
-- **値の取得**: raw値（0-4095）、正規化値（0.0-1.0）、マップ値
-- **フィルタリング**: なし（必要に応じてローパスフィルター実装可能）
-
-#### パラメーターマッピング例
-```cpp
-// 音量制御（指数カーブ）
-float volume = knob_value * knob_value * 32.0f;
-
-// 周波数制御（対数カーブ）
-float frequency = 100.0f * powf(20.0f, knob_value); // 100Hz-2000Hz
-
-// FM変調指数（線形）
-float modulation_index = knob_value * 10.0f;
-```
-
-#### 注意事項とトラブルシューティング
-- **電源ノイズ**: アナログ電源ラインにバイパスコンデンサ必須
-- **グラウンドループ**: デジタル・アナロググラウンド分離推奨
-- **スイッチングノイズ**: 74HC4051のスイッチング時にスパイクが発生する可能性
-- **応答性**: スキャン周期とUI応答性のバランス調整が重要
-
-#### 実装例（sine_wave_i2s_32bサンプル）
-```cpp
-// ノブ機能の定義
-enum KnobFunction {
-    KNOB_VOLUME = 0,     // ノブ0: マスターボリューム
-    KNOB_LEFT_FREQ = 1,  // ノブ1: 左チャンネル周波数
-    KNOB_RIGHT_FREQ = 2, // ノブ2: 右チャンネル周波数
-    // ... 他のノブ
-};
-
-// メインループ内での使用
-while (true) {
-    g_analog_mux.Update();
-    
-    float knob_volume = g_analog_mux.GetNormalizedValue(KNOB_VOLUME);
-    float knob_left_freq = g_analog_mux.GetNormalizedValue(KNOB_LEFT_FREQ);
-    float knob_right_freq = g_analog_mux.GetNormalizedValue(KNOB_RIGHT_FREQ);
-    
-    // パラメーターマッピング
-    uint new_vol = (uint)(knob_volume * 32);
-    uint32_t new_step0 = 0x10000 + (uint32_t)(knob_left_freq * (0x200000 - 0x10000));
-    uint32_t new_step1 = 0x10000 + (uint32_t)(knob_right_freq * (0x200000 - 0x10000));
-    
-    // 値を更新
-    vol = new_vol;
-    step0 = new_step0;
-    step1 = new_step1;
-    
-    sleep_ms(10);
-}
-```
+📖 **詳細は専用ドキュメントを参照:** [docs/ANALOG_MUX.md](docs/ANALOG_MUX.md)
 
 ### コードメンテナンス
 
