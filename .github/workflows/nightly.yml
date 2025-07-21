@@ -35,17 +35,15 @@ jobs:
 
       - name: Setup Pico SDK and dependencies
         run: |
-          # Pico SDKをクローン
-          git clone -b 2.1.1 --depth 1 https://github.com/raspberrypi/pico-sdk.git /external/pico-sdk
-          cd /external/pico-sdk
+          # Pico SDKを作業ディレクトリにクローン
+          git clone -b 2.1.1 --depth 1 https://github.com/raspberrypi/pico-sdk.git pico-sdk-external
+          cd pico-sdk-external
           git submodule update --init
+          cd ..
           
           # 環境変数をGitHub Actionsの環境に設定
-          echo "PICO_SDK_PATH=/external/pico-sdk" >> $GITHUB_ENV
+          echo "PICO_SDK_PATH=${{ github.workspace }}/pico-sdk-external" >> $GITHUB_ENV
           echo "PICO_EXTRAS_PATH=${{ github.workspace }}/libs/pico-extras" >> $GITHUB_ENV
-          
-          # pico_extras_import.cmakeのパスを修正（ルートディレクトリにコピー）
-          cp ${{ github.workspace }}/libs/pico-extras/external/pico_extras_import.cmake ${{ github.workspace }}/libs/pico-extras/pico_extras_import.cmake
 
       - name: Find all sample projects
         id: find_samples
@@ -109,21 +107,19 @@ jobs:
 
       - name: Setup Pico SDK and dependencies
         run: |
-          # Pico SDKをクローン
-          git clone -b 2.1.1 --depth 1 https://github.com/raspberrypi/pico-sdk.git /external/pico-sdk
-          cd /external/pico-sdk
+          # Pico SDKを作業ディレクトリにクローン
+          git clone -b 2.1.1 --depth 1 https://github.com/raspberrypi/pico-sdk.git pico-sdk-external
+          cd pico-sdk-external
           git submodule update --init
+          cd ..
           
           # ARM GCCツールチェーンをインストール
           sudo apt-get update
           sudo apt-get install -y gcc-arm-none-eabi
           
           # 環境変数をGitHub Actionsの環境に設定
-          echo "PICO_SDK_PATH=/external/pico-sdk" >> $GITHUB_ENV
+          echo "PICO_SDK_PATH=${{ github.workspace }}/pico-sdk-external" >> $GITHUB_ENV
           echo "PICO_EXTRAS_PATH=${{ github.workspace }}/libs/pico-extras" >> $GITHUB_ENV
-          
-          # pico_extras_import.cmakeのパスを修正
-          cp ${{ github.workspace }}/libs/pico-extras/external/pico_extras_import.cmake ${{ github.workspace }}/libs/pico-extras/pico_extras_import.cmake
 
       - name: Build current version
         run: |
@@ -164,17 +160,15 @@ jobs:
 
       - name: Setup Pico SDK and dependencies
         run: |
-          # Pico SDKをクローン
-          git clone -b 2.1.1 --depth 1 https://github.com/raspberrypi/pico-sdk.git /external/pico-sdk
-          cd /external/pico-sdk
+          # Pico SDKを作業ディレクトリにクローン
+          git clone -b 2.1.1 --depth 1 https://github.com/raspberrypi/pico-sdk.git pico-sdk-external
+          cd pico-sdk-external
           git submodule update --init
+          cd ..
           
           # 環境変数をGitHub Actionsの環境に設定
-          echo "PICO_SDK_PATH=/external/pico-sdk" >> $GITHUB_ENV
+          echo "PICO_SDK_PATH=${{ github.workspace }}/pico-sdk-external" >> $GITHUB_ENV
           echo "PICO_EXTRAS_PATH=${{ github.workspace }}/libs/pico-extras" >> $GITHUB_ENV
-          
-          # pico_extras_import.cmakeのパスを修正
-          cp ${{ github.workspace }}/libs/pico-extras/external/pico_extras_import.cmake ${{ github.workspace }}/libs/pico-extras/pico_extras_import.cmake
 
       - name: Compile-time benchmark
         run: |
