@@ -34,6 +34,7 @@ public:
             raw_values_[i] = 0;
             float_values_[i] = 0.0f;
         }
+        // config_は Init() で設定されるため、ここでは初期化不要
     }
 
     void Init(const Config& config)
