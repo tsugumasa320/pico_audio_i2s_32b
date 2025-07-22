@@ -57,8 +57,6 @@ enum {
 // #define SAMPLES_PER_BUFFER 1156 // 大きなバッファ（元の値）
 #endif
 
-// デバッグ用フラグ
-#define DEBUG_FALLBACK_SINE 0   // 1にすると問題切り分け用のサイン波に切り替え（テスト中）
 
 // グローバル変数
 static bool audio_enabled = false;
@@ -95,9 +93,6 @@ void core1_audio_loop() {
     printf("Core1 FM Cross-Modulation processing started\n");
     uint32_t buffer_count = 0;
     
-    // **LEDデバッグ：音声処理の状態を視覚化**
-    const uint LED_PIN = 25;  // Pico 2の内蔵LED
-    static bool led_state = false;
     
     // **参照版の2つのFMシンセ初期化**
     const float sample_rate = 48000.0f;
@@ -141,11 +136,6 @@ void core1_audio_loop() {
         const uint32_t sample_count = buffer->max_sample_count;
 
         if (audio_enabled) {
-            // **LEDデバッグ：音声処理中であることを示す（1秒ごとに点滅）**
-            if (buffer_count % 750 == 0) {  // 約1秒ごと（64samples×750≈48000samples≈1秒）
-                led_state = !led_state;
-                gpio_put(LED_PIN, led_state);
-            }
             
             // アナログマルチプレクサーの値を取得（参照版と完全同じ）
             g_analog_mux.Update();
@@ -158,21 +148,8 @@ void core1_audio_loop() {
             const int val6 = (int)(g_analog_mux.GetNormalizedValue(6) * 1023);
             const int val7 = (int)(g_analog_mux.GetNormalizedValue(7) * 1023);
             
-            // **シンプルFMテスト：1つのFMシンセのみ使用**
+            // FM Cross-Modulation処理
             for (uint32_t i = 0; i < sample_count; i++) {
-#if DEBUG_FALLBACK_SINE
-                // フォールバック用サイン波（問題切り分け用）
-                static float phase = 0.0f;
-                const float freq = 440.0f;
-                const float sample_rate = 48000.0f;
-                const float amplitude = 0.1f;
-                
-                mixed_out = amplitude * sinf(phase);
-                phase += 2.0f * M_PI * freq / sample_rate;
-                if (phase >= 2.0f * M_PI) {
-                    phase -= 2.0f * M_PI;
-                }
-#else
                 // **参照版の意図的破綻設計：val0=0で最高音質**
                 if (val0 > 0) { // ここは0が一番音が良い気がする
                     out1 = fm1.Process();
@@ -198,7 +175,6 @@ void core1_audio_loop() {
                 // クリッピング防止
                 if (mixed_out > 1.0f) mixed_out = 1.0f;
                 if (mixed_out < -1.0f) mixed_out = -1.0f;
-#endif
 
                 // 32bit signed integerに変換
                 sample = (int32_t)(mixed_out * 2147483647.0f);
@@ -231,12 +207,7 @@ void core1_audio_loop() {
                 }
             }
             
-            // デバッグ出力（最初の数バッファ）
             buffer_count++;
-            if (buffer_count <= 3) {
-                printf("FM TEST Buffer %d: sample_count=%d, first_sample=0x%08x, out1=%.4f\n", 
-                       buffer_count, sample_count, samples[0], out1);
-            }
         } else {
             // 無音
             for (uint32_t i = 0; i < sample_count; i++) {
@@ -247,11 +218,6 @@ void core1_audio_loop() {
 
         buffer->sample_count = sample_count;
         give_audio_buffer(g_audio_pool, buffer);
-        
-        // 500バッファごとにデバッグ出力
-        if (buffer_count % 500 == 0) {
-            printf("Cross FM: %d buffers processed\n", buffer_count);
-        }
     }
 }
 
@@ -261,23 +227,16 @@ void core1_audio_loop() {
 bool init_synth() {
     stdio_init_all();
     
-    // **LEDデバッグ：プログラムが動作していることを視覚的に確認**
-    const uint LED_PIN = 25;  // Pico 2の内蔵LED
+    // Pico 2 内蔵LED初期化
+    const uint LED_PIN = 25;
     gpio_init(LED_PIN);
     gpio_set_dir(LED_PIN, GPIO_OUT);
-    
-    // LEDパターンで起動確認（3回点滅）
-    for (int i = 0; i < 3; i++) {
-        gpio_put(LED_PIN, 1);
-        sleep_ms(200);
-        gpio_put(LED_PIN, 0);
-        sleep_ms(200);
-    }
+    gpio_put(LED_PIN, 1);  // 起動完了表示
     
     // USBシリアル接続の確実な確立
     sleep_ms(3000);  // 3秒待機に延長
     
-    printf("=== Cross FM Synthesizer DEBUG VERSION v3.0 ===\n");
+    printf("=== Cross FM Synthesizer v3.0 ===\n");
     printf("Build time: " __DATE__ " " __TIME__ "\n");
     printf("System starting...\n");
     
@@ -287,17 +246,9 @@ bool init_synth() {
     // LED点灯でStep 1完了を表示
     gpio_put(LED_PIN, 1);
     
-    // システムクロック設定 (96MHz動作) - 一時的に無効化してテスト
-    printf("Step 2: Skipping system clock reconfiguration for stability\n");
-    /*
-    pll_init(pll_usb, 1, 1536 * MHZ, 4, 4);
-    clock_configure(clk_usb, 0, CLOCKS_CLK_USB_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB, 96 * MHZ, 48 * MHZ);
-    clock_configure(clk_sys, CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX, CLOCKS_CLK_SYS_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB, 96 * MHZ, 96 * MHZ);
-    clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS, 96 * MHZ, 96 * MHZ);
-    stdio_init_all();
-    */
-    
-    printf("Step 3: System clock configuration skipped\n");
+    printf("Step 2: Using default system clock configuration\n");
+    printf("  clk_sys: %u Hz (%.1f MHz)\n", clock_get_hz(clk_sys), clock_get_hz(clk_sys) / 1000000.0f);
+    printf("  clk_peri: %u Hz (%.1f MHz)\n", clock_get_hz(clk_peri), clock_get_hz(clk_peri) / 1000000.0f);
     
     // DCDC電源制御
     printf("Step 4: Configuring DCDC for low-noise audio...\n");
@@ -316,13 +267,13 @@ bool init_synth() {
         .pin_s2 = kPinS2,
         .adc_pin = kAnalogIn,
         .adc_channel = 0,
-        .scan_period_ms = 1, // 参照版と完全同じ（1ms高速スキャン）
+        .scan_period_ms = 1,
         .enable_active_low = true
     };
     g_analog_mux.Init(mux_config);
     printf("Step 7: Analog multiplexer initialized\n");
     
-    // オーディオシステム初期化（参照版と同じ48kHz）
+    // オーディオシステム初期化
     static audio_format_t audio_format = {
         .sample_freq = 48000,
         .pcm_format = AUDIO_PCM_FORMAT_S32,

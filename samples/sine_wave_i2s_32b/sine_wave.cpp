@@ -240,11 +240,9 @@ int main() {
 
     stdio_init_all();
     
-    // デバッグ用の起動確認
-    sleep_ms(2000);  // USBシリアル安定化のための待機
+    sleep_ms(2000);  // USBシリアル安定化
     
     printf("\n=== 32bit I2S DAC サイン波ジェネレーター ===\n");
-    printf("プログラム開始 - デバッグモード\n");
     printf("操作方法:\n");
     printf("  +/= : 音量アップ\n");
     printf("  -   : 音量ダウン\n");
@@ -381,13 +379,6 @@ int main() {
             if (c == 'q') break;
         }
         
-        // 5秒ごとに現在の設定値を表示
-        static uint32_t last_debug_time = 0;
-        if (current_time - last_debug_time > 5000) {
-            printf("Knobs: Vol=%.2f(=%d) L=%.2f(=%d) R=%.2f(=%d)\n", 
-                   knob_volume, vol, knob_left_freq, (int)(step0 >> 16), knob_right_freq, (int)(step1 >> 16));
-            last_debug_time = current_time;
-        }
         
         // 短い待機
         sleep_ms(10);
