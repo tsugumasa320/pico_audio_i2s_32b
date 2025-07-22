@@ -37,17 +37,17 @@ pico-examples/
 *.hex
 *.dis
 
-# CMake generated files
+# CMake generated files (build artifacts only)
 CMakeFiles/
 CMakeCache.txt
-cmake_install.cmake
+build/**/cmake_install.cmake
+build/**/CMakeDirectoryInformation.cmake
+build/**/DependInfo.cmake
+build/**/cmake_clean*.cmake
 Makefile
-*.cmake
-# But keep important CMake files
-!**/pico_*_import.cmake
-!**/pico_extras_import.cmake  
-!**/pico_sdk_import.cmake
-!**/post_init.cmake
+
+# NOTE: Keep all source *.cmake files (import files, config files, etc.)
+# Only exclude build-generated cmake files
 
 # Logs
 *.log
