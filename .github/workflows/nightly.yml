@@ -31,7 +31,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
+          fetch-depth: 1
 
       - name: Setup Pico SDK and dependencies
         run: |
@@ -106,7 +107,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
+          fetch-depth: 1
           fetch-depth: 50  # 過去50コミットを取得
 
       - name: Setup Pico SDK and dependencies
@@ -124,6 +126,24 @@ jobs:
           # 環境変数をGitHub Actionsの環境に設定
           echo "PICO_SDK_PATH=${{ github.workspace }}/pico-sdk-external" >> $GITHUB_ENV
           echo "PICO_EXTRAS_PATH=${{ github.workspace }}/libs/pico-extras" >> $GITHUB_ENV
+
+      - name: Verify pico-extras structure
+        run: |
+          echo "=== Pico-extras Diagnostic ==="
+          echo "Working directory: $(pwd)"
+          echo "Workspace: ${{ github.workspace }}"
+          echo "PICO_EXTRAS_PATH: ${{ github.workspace }}/libs/pico-extras"
+          
+          # ディレクトリ構造の確認
+          ls -la libs/ || echo "libs directory not found"
+          ls -la libs/pico-extras/ || echo "pico-extras directory not found"
+          
+          # 重要ファイルの存在確認
+          [ -f "libs/pico-extras/post_init.cmake" ] && echo "✅ post_init.cmake found" || echo "❌ post_init.cmake missing"
+          [ -f "libs/pico-extras/external/pico_extras_import.cmake" ] && echo "✅ pico_extras_import.cmake found" || echo "❌ pico_extras_import.cmake missing"
+          
+          # サブモジュール状態の確認  
+          git submodule status | grep pico-extras || echo "pico-extras not in submodules"
 
       - name: Build current version
         run: |
@@ -160,7 +180,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
+          fetch-depth: 1
 
       - name: Setup Pico SDK and dependencies
         run: |
@@ -221,7 +242,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
+          fetch-depth: 1
 
       - name: Check submodule status
         run: |
