@@ -224,15 +224,15 @@ jobs:
           
           # 行数統計
           echo "Source lines of code:"
-          find pico_audio_i2s -name "*.c" -o -name "*.cpp" -o -name "*.h" | xargs wc -l | tail -1
+          find samples products libs/pico_audio_32b libs/pico_audio_core -name "*.c" -o -name "*.cpp" -o -name "*.h" 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 || echo "No source files found"
           
           # ファイル数統計
           echo "Number of source files:"
-          find pico_audio_i2s -name "*.c" -o -name "*.cpp" -o -name "*.h" | wc -l
+          find samples products libs/pico_audio_32b libs/pico_audio_core -name "*.c" -o -name "*.cpp" -o -name "*.h" 2>/dev/null | wc -l
           
           # 最大ファイルサイズ
           echo "Largest source files:"
-          find pico_audio_i2s -name "*.c" -o -name "*.cpp" -o -name "*.h" -exec wc -l {} + | sort -nr | head -5
+          find samples products libs/pico_audio_32b libs/pico_audio_core -name "*.c" -o -name "*.cpp" -o -name "*.h" 2>/dev/null -exec wc -l {} + | sort -nr | head -5
 
   # 依存関係チェック
   dependency-check:
@@ -325,7 +325,7 @@ jobs:
           
           # ソースファイルのライセンスヘッダーチェック
           missing_license=0
-          find pico_audio_i2s -name "*.c" -o -name "*.cpp" -o -name "*.h" | while read file; do
+          find samples products libs/pico_audio_32b libs/pico_audio_core -name "*.c" -o -name "*.cpp" -o -name "*.h" 2>/dev/null | while read file; do
             if ! head -10 "$file" | grep -q -i "license\|copyright"; then
               echo "⚠️ $file missing license header"
               missing_license=$((missing_license + 1))
